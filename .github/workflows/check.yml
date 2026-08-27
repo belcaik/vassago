@@ -1,0 +1,16 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Everything the checks need is preinstalled on ubuntu-latest:
+      # sh, git, python3 (stdlib only) and docker compose.
+      - name: Run repository checks
+        run: sh scripts/check.sh
