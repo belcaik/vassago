@@ -1,0 +1,73 @@
+name: calendar
+
+services:
+  radicale:
+    image: ghcr.io/kozea/radicale:stable
+    container_name: radicale
+    restart: unless-stopped
+
+    ports:
+      - "192.168.0.8:5232:5232"
+
+    volumes:
+      - ./radicale/config:/etc/radicale:ro,Z
+      - ./radicale/data:/var/lib/radicale:Z,U
+
+    networks:
+      - calendar
+
+
+  caldir:
+    image: localhost/calendar-caldir:vtodo-support
+    container_name: caldir
+    restart: unless-stopped
+
+    environment:
+      TZ: America/Santiago
+      CRON_SCHEDULE: "*/15 * * * *"
+      RUN_ON_START: "true"
+      HOME: /data
+
+      RADICALE_URL: "http://radicale:5232"
+      RADICALE_USER: "${RADICALE_USER}"
+      RADICALE_PASSWORD: "${RADICALE_PASSWORD}"
+    
+    volumes:
+      - ./caldir/config:/data/.config/caldir:Z
+      - ./caldir/state:/data/.local/share/caldir:Z
+      - ./caldir/calendars:/data/calendars:z
+
+    depends_on:
+      - radicale
+
+    networks:
+      - calendar
+
+  u-crawler:
+    image: ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1
+    container_name: u-crawler-calendar
+    restart: unless-stopped
+
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Santiago
+
+      # Una vez al día a las 05:00
+      CRON_SCHEDULE: "0 5 * * *"
+
+      # Por ahora false, primero lo probaremos nosotros.
+      RUN_ON_START: "true"
+
+    volumes:
+      - ./u-crawler/config:/home/appuser/.config/u_crawler:Z
+
+      # Compartido con Caldir.
+      - ./caldir/calendars:/home/appuser/Caldir:z
+
+    networks:
+      - calendar
+
+networks:
+  calendar:
+    name: calendar
