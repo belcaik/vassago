@@ -8,6 +8,10 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("CALENDAR_ROOT", "/data/calendars"))
 
+# Academic terms processed together; keep identical across the five scripts.
+TERM_PREFIXES = ("202615_", "202625_")
+
+
 # Estos campos pueden ser modificados por Thunderbird / Google.
 # u_crawler no debe pisarlos en cada regeneración.
 USER_STATE_FIELDS = {
@@ -137,7 +141,11 @@ def sync_deadlines() -> tuple[int, int, int]:
     updated = 0
     removed = 0
 
-    for course_dir in sorted(ROOT.glob("202615_*")):
+    for course_dir in sorted(
+        path
+        for prefix in TERM_PREFIXES
+        for path in ROOT.glob(f"{prefix}*")
+    ):
         source_dir = course_dir / "deadlines"
 
         if not source_dir.is_dir():
@@ -198,7 +206,11 @@ def sync_windows() -> tuple[int, int]:
     updated = 0
     removed = 0
 
-    for course_dir in sorted(ROOT.glob("202615_*")):
+    for course_dir in sorted(
+        path
+        for prefix in TERM_PREFIXES
+        for path in ROOT.glob(f"{prefix}*")
+    ):
         source_dir = course_dir / "windows"
 
         if not source_dir.is_dir():

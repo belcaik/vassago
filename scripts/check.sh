@@ -88,22 +88,20 @@ caldir/dedupe-vtodo.py caldir/bridge-vtodo.py caldir/bridge-windows.py"
 
 : > "$TMPDIR_CHECK/prefixes"
 
+# Each script may list several terms (a transition between semesters), but
+# every script must list exactly the same set.
 for file in $term_files; do
     found="$(grep -oE '[0-9]{6}_' "$file" | sort -u | tr '\n' ' ')"
 
     [ -n "$found" ] || fail "$file declares no NNNNNN_ term prefix"
 
-    set -- $found
-    [ "$#" -eq 1 ] || fail "$file mixes several term prefixes: $found"
-
-    echo "$1" >> "$TMPDIR_CHECK/prefixes"
+    echo "$found" >> "$TMPDIR_CHECK/prefixes"
 done
 
-term_prefix="$(sort -u < "$TMPDIR_CHECK/prefixes" | tr '\n' ' ')"
+term_sets="$(sort -u < "$TMPDIR_CHECK/prefixes")"
 
-set -- $term_prefix
-[ "$#" -eq 1 ] \
-    || fail "term prefixes are out of lockstep across the five scripts: $term_prefix"
+[ "$(printf '%s\n' "$term_sets" | wc -l)" -eq 1 ] \
+    || fail "term prefixes are out of lockstep across the five scripts: $(printf '%s\n' "$term_sets" | tr '\n' '|')"
 
 
 # 5. Dockerfile coverage -----------------------------------------------------

@@ -51,10 +51,10 @@ Host paths under `caldir/calendars/`, mounted at `/data/calendars` in the
 
 - ALWAYS run `sh scripts/check.sh` before claiming a change works. See
   [.claude/skills/validate-vassago/SKILL.md](.claude/skills/validate-vassago/SKILL.md).
-- ALWAYS keep the `202615_` term prefix byte-identical across the five scripts
-  that hardcode it: `provision-radicale.sh`, `merge-ucrawler.py`,
-  `bridge-vtodo.py`, `bridge-windows.py`, `dedupe-vtodo.py`. `scripts/check.sh`
-  enforces this.
+- ALWAYS keep the `TERM_PREFIXES` list identical across the five scripts that
+  declare it: `provision-radicale.sh`, `merge-ucrawler.py`, `bridge-vtodo.py`,
+  `bridge-windows.py`, `dedupe-vtodo.py`. `scripts/check.sh` enforces this.
+  Drop an old term only as described in docs/operations.md#term-rotation.
 - ALWAYS keep the step order in `caldir/run-sync.sh` as listed above; the two
   `caldir sync` phases bracket the bridges by design.
 - ALWAYS stay on stdlib Python 3 and POSIX `sh`. Adding a dependency means

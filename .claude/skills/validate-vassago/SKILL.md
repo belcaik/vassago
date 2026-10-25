@@ -30,7 +30,7 @@ The checks run in this order; find the one that failed and act on it.
    or runtime paths. A hit means a credential or live calendar file got staged
    or committed. Remove it from the index before anything else, and check
    `.gitignore` still covers it. See [docs/security.md](../../../docs/security.md#what-is-gitignored).
-4. **Term-prefix lockstep** — the `202615_` literal must be identical in
+4. **Term-prefix lockstep** — the set of `NNNNNN_` prefixes in `TERM_PREFIXES` must be identical in
    `provision-radicale.sh`, `merge-ucrawler.py`, `bridge-vtodo.py`,
    `bridge-windows.py`, and `dedupe-vtodo.py`. A failure means one script was
    rotated to a new term and the others were not; the pipeline would silently

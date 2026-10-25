@@ -31,11 +31,11 @@ one as a drive-by; each needs its own approved change.
   `--branch vtodo-support --depth 1`, so two builds of the same Dockerfile can
   produce different binaries and nothing records which commit is in a given
   image. See [ADR-0006](adr/0006-caldir-built-from-vtodo-support-branch.md).
-- **The term prefix `202615_` is hardcoded in five files.** They must change in
-  lockstep or the pipeline silently half-migrates:
-  `caldir/provision-radicale.sh:79`, `caldir/merge-ucrawler.py:140,201`,
-  `caldir/dedupe-vtodo.py:36`, `caldir/bridge-vtodo.py:379,827`,
-  `caldir/bridge-windows.py:167,558`.
+- **The term prefixes are hardcoded in five files** as an identical
+  `TERM_PREFIXES` list (`202615_`, `202625_`). They must change in lockstep or
+  the pipeline silently half-migrates, and dropping an old prefix deletes that
+  term's items from Google; see
+  [ADR-0008](adr/0008-overlapping-academic-terms.md).
 - **`caldir/Dockerfile:68` has a trailing space after the line-continuation
   backslash.** The Dockerfile parser tolerates it and the image builds; linters
   flag it. Changing it is a lint-only edit and needs its own approval.

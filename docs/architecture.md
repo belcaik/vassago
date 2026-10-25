@@ -236,12 +236,13 @@ windows are managed when the UID starts with `u_crawler-window-`
 (`caldir/bridge-windows.py:36`). Items carrying any other UID — a personal
 Google task, for instance — are skipped by both bridges and never modified.
 
-**Term prefix.** `202615_` is hardcoded in five scripts:
-`caldir/provision-radicale.sh:79`, `caldir/merge-ucrawler.py:140` and `:201`,
-`caldir/bridge-vtodo.py:379` and `:827`, `caldir/bridge-windows.py:167` and
-`:558`, `caldir/dedupe-vtodo.py:36`. All five must move together when the term
-changes. That `202615` denotes an academic term identifier is an assumption;
-nothing in the repository states its meaning.
+**Term prefixes.** Each of the five scripts declares the same `TERM_PREFIXES`
+list (currently `202615_` and `202625_`) and iterates over it wherever it globs
+course directories: `caldir/provision-radicale.sh`, `caldir/merge-ucrawler.py`,
+`caldir/bridge-vtodo.py`, `caldir/bridge-windows.py`, `caldir/dedupe-vtodo.py`.
+The lists must stay identical; see
+[ADR-0008](adr/0008-overlapping-academic-terms.md). The prefixes are taken to be
+UNAB academic term codes, as written by u_crawler.
 
 **Log prefixes.** Every script tags its output, which makes the pipeline
 greppable in the container log:

@@ -43,15 +43,13 @@ class TermPrefixLockstepTest(unittest.TestCase):
                     f"{relative} has no NNNNNN_ term prefix",
                 )
 
-    def test_all_scripts_use_the_same_term_prefix(self):
-        union = set()
-        for matches in self.prefixes().values():
-            union |= matches
+    def test_all_scripts_use_the_same_term_prefix_set(self):
+        sets = {frozenset(m) for m in self.prefixes().values()}
 
         self.assertEqual(
-            len(union),
+            len(sets),
             1,
-            f"term prefixes are out of lockstep: {sorted(union)}",
+            f"term prefixes are out of lockstep: {sorted(map(sorted, sets))}",
         )
 
 
