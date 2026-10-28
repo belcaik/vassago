@@ -198,6 +198,23 @@ hard delete in Google must not erase the Canvas-derived source of truth. To
 drop a task, complete or cancel it instead — `STATUS` and `COMPLETED` are
 `COMMON_FIELDS` and travel back to canonical through row 14.
 
+### Adopting a Google copy (before the table)
+
+Google Tasks keeps no iCalendar UID. Caldir before fork `3ca66aa` pulled every
+pushed task back as `<id>@google-tasks.com` and dropped the managed mirror
+file, so re-seeding that assignment (rows 2 and 8) would push a second task to
+Google. `adopt_google_copies()` runs first: for a canonical assignment with no
+mirror file, an unmanaged mirror task that
+
+- carries an `X-GOOGLE-TASK-ID` no managed mirror file carries, and
+- matches that assignment, and only that one, on `SUMMARY` and `DUE` date,
+
+has its `UID` rewritten to the assignment's UID and becomes `right` for the
+table. Logs `[bridge] adopt Google task <- <uid> (already in Google under a
+derived UID)`. Ambiguous matches are left alone and fall through to rows 2/8.
+No row changes: a restored assignment whose Google copy now says `COMPLETED`
+goes through row 14, exactly like any Google edit.
+
 A duplicate managed UID on either side raises `RuntimeError`
 (`:390-394`, `:415-420`) — see [Exit codes](#exit-codes).
 
@@ -284,6 +301,14 @@ Every non-keeper file in the group is `shutil.move`d to
 Nothing is deleted. The script always returns 0.
 
 ## Phase 2 and convergence
+
+Caldir identifies a Google task by `X-GOOGLE-TASK-ID`, not by UID: a listed
+task, which Google always reports as `<id>@google-tasks.com`, takes the UID of
+the one mirror file carrying the same id (fork `3ca66aa`), and the fields
+Google Tasks cannot hold (`URL`, `DTSTART`, `PRIORITY`, non-Google `X-`
+properties, …) are taken from that file instead of reading as a remote edit
+(fork `5bf58e0`). A seeded assignment carries no id until its first push;
+caldir writes it back into the mirror file from the create response.
 
 The caldir fork forgets a sync base after an applied delete. When a bridge
 restores an item whose Google copy was deleted, phase 2 therefore treats the
