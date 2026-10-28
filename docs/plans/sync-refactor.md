@@ -37,7 +37,8 @@
 
 | # | Sospecha | Cómo confirmarla (solo lectura) |
 | --- | --- | --- |
-| E1 | Calendario de ventanas oculto o no seleccionado en la lista del usuario | `diagnose-google.py` → `calendarList/get` (`hidden`, `selected`); `provision-google.py` ahora lo advierte. |
+| E0 | ~~Diff perpetuo de ventanas~~ **confirmado en código y corregido**: el bridge descartaba `ORGANIZER` | prueba `test_google_assigned_organizer_does_not_cause_perpetual_updates` |
+| E1 | Calendario de ventanas oculto o no seleccionado en la lista del usuario (además `provision-google.py` no pedía `showHidden`, ahora sí) | `diagnose-google.py` → `calendarList/get` (`hidden`, `selected`); `provision-google.py` ahora lo advierte. |
 | E2 | "Pushed: 57 updated" sobre eventos borrados (`status=cancelled`) que la actualización no reactiva | `diagnose-google.py` → `events.list?showDeleted=true`, conteo por `status` y destino de cada `X-GOOGLE-EVENT-ID` local. |
 | E3 | Mismo bucle que D en ventanas (restore + borrado en fase 2) | `verify-sync.py` al final de la ejecución; `diagnose-google.py`. |
 | E4 | `google_calendar_id` apunta a otro calendario homónimo | `diagnose-google.py` imprime `summary`/`accessRole` del ID configurado. |

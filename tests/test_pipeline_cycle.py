@@ -69,6 +69,9 @@ class FakeCaldir:
         self.pending_remote_edits: set[str] = set()
         self.ids = itertools.count(1)
         self.changes = 0
+        # Lines the provider adds to every item it returns (Google adds
+        # ORGANIZER to events) and never sends back on a push.
+        self.assigned_lines: list[str] = []
 
     # Google-side actions --------------------------------------------------
     def user_edits(self, uid, old, new):
@@ -88,8 +91,15 @@ class FakeCaldir:
 
     def with_id(self, raw, remote_id):
         body = without_id(raw, self.id_prop).replace("\r\n", "\n")
+        for line in self.assigned_lines:
+            body = "\n".join(
+                kept for kept in body.split("\n") if kept != line
+            )
         marker = "END:VTODO" if "BEGIN:VTODO" in body else "END:VEVENT"
-        body = body.replace(marker, f"{self.id_prop}:{remote_id}\n{marker}")
+        added = "".join(f"{line}\n" for line in self.assigned_lines)
+        body = body.replace(
+            marker, f"{added}{self.id_prop}:{remote_id}\n{marker}"
+        )
         return body.replace("\n", "\r\n")
 
     def sync(self):
@@ -348,6 +358,25 @@ class PipelineCycleTest(unittest.TestCase):
         self.assertEqual(len(self.google_cal.remote), 2)
         for path in self.windows.glob("*.ics"):
             self.assertIn("X-GOOGLE-EVENT-ID:", path.read_text())
+
+    def test_google_assigned_organizer_does_not_cause_perpetual_updates(self):
+        # Google returns ORGANIZER on every event; the windows bridge used to
+        # strip it, so phase 2 pushed an update for every window every run.
+        self.google_cal.assigned_lines = [
+            "ORGANIZER:mailto:cal@group.calendar.google.com"
+        ]
+        self.export("202625_physics", 1, kind="windows")
+        self.export("202625_physics", 2, kind="windows")
+        self.cycle()
+        self.google_cal.changes = 0
+
+        rcs, verify, out = self.cycle()
+
+        self.assertEqual((rcs, verify), ((0, 0), 0))
+        self.assertEqual(self.google_cal.changes, 0)
+        self.assertIn(
+            "[windows-bridge] done: 0 changed, 0 deleted, 0 conflicts", out
+        )
 
     def test_unpublished_window_fails_verification(self):
         self.export("202625_physics", 1, kind="windows")

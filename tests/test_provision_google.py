@@ -149,6 +149,30 @@ class ProvisionGoogleTest(unittest.TestCase):
         self.assertEqual(err, "")
 
 
+class EnsureWindowsCalendarTest(ProvisionGoogleTest):
+    def test_hidden_calendar_is_found_not_duplicated(self):
+        def request_json(url, **kwargs):
+            self.calls.append((kwargs.get("method", "GET"), url))
+            if "showHidden=true" not in url:
+                return {"items": []}
+            return {"items": [{
+                "id": "cal@group",
+                "summary": self.mod.WINDOWS_CALENDAR_NAME,
+                "accessRole": "owner",
+                "hidden": True,
+            }]}
+
+        self.mod.request_json = request_json
+
+        calendar_id, err = self.run_quiet(
+            lambda: self.mod.ensure_windows_calendar("token")
+        )
+
+        self.assertEqual(calendar_id, "cal@group")
+        self.assertEqual({method for method, _ in self.calls}, {"GET"})
+        self.assertIn("is hidden", err)
+
+
 class DiagnoseGoogleTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -186,8 +210,12 @@ class DiagnoseGoogleTest(unittest.TestCase):
 
     def test_reports_cancelled_events_and_uses_only_get(self):
         responses = {
-            "calendarList": {"summary": "UNAB", "accessRole": "owner",
-                             "selected": False},
+            "calendarList/": {"summary": "UNAB", "accessRole": "owner",
+                              "selected": False},
+            "calendarList?": {"items": [
+                {"id": "cal@group", "summary": "UNAB"},
+                {"id": "old@group", "summary": "UNAB", "hidden": True},
+            ]},
             "/events": {"items": [
                 {"id": "ev1", "status": "cancelled"},
                 {"id": "ev2", "status": "confirmed",
@@ -213,6 +241,8 @@ class DiagnoseGoogleTest(unittest.TestCase):
         text = out.getvalue()
         self.assertEqual(set(self.methods), {"GET"})
         self.assertIn("selected=False", text)
+        self.assertIn("cal@group (configured)", text)
+        self.assertIn("old@group hidden=True", text)
         self.assertIn("{'cancelled': 1, 'active': 1}", text)
         self.assertIn("cancelled: w1", text)
         self.assertIn("{'completed': 1}", text)

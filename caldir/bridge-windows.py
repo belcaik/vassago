@@ -45,6 +45,15 @@ IGNORE_FOR_HASH = {
 
 GOOGLE_PRIVATE_PREFIX = "X-GOOGLE-"
 
+# Properties Google assigns on its own and u_crawler never exports. caldir
+# writes them back after every push, but its PATCH never sends them, so
+# stripping them in the mirror made phase 2 push an update for every window
+# on every run. They are kept from the mirror (unless the canonical file sets
+# them, in which case it wins) and do not count as a Google-side edit.
+GOOGLE_ASSIGNED = {
+    "ORGANIZER",
+}
+
 
 @dataclass
 class Item:
@@ -148,7 +157,7 @@ def semantic_hash(item: Item) -> str:
     values: list[str] = []
 
     for name in sorted(item.props):
-        if name in IGNORE_FOR_HASH:
+        if name in IGNORE_FOR_HASH or name in GOOGLE_ASSIGNED:
             continue
 
         if name.startswith(GOOGLE_PRIVATE_PREFIX):
@@ -268,14 +277,21 @@ def merge_canonical_into_google(
     g_start, g_end = find_vevent(google_lines)
     c_start, c_end = find_vevent(canonical_lines)
 
+    canonical_names = {
+        property_name(line)
+        for line in canonical_lines[c_start + 1 : c_end]
+    }
+
     google_private: list[str] = []
 
     for line in google_lines[g_start + 1 : g_end]:
         name = property_name(line)
 
-        if (
-            name is not None
-            and name.startswith(GOOGLE_PRIVATE_PREFIX)
+        if name is None:
+            continue
+
+        if name.startswith(GOOGLE_PRIVATE_PREFIX) or (
+            name in GOOGLE_ASSIGNED and name not in canonical_names
         ):
             google_private.append(line)
 

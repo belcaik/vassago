@@ -495,8 +495,11 @@ def list_calendars(
     page_token = None
 
     while True:
+        # Without showHidden a calendar the user hid is not listed, and
+        # ensure_windows_calendar would create a second one with that name.
         params = {
             "maxResults": "250",
+            "showHidden": "true",
         }
 
         if page_token:

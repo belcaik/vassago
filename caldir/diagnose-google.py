@@ -134,6 +134,28 @@ def diagnose_windows(provision, token: str) -> None:
         f"timeZone={entry.get('timeZone')}"
     )
 
+    namesakes = [
+        item
+        for item in paged(
+            provision,
+            token,
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            {"showHidden": "true", "showDeleted": "true", "maxResults": "250"},
+        )
+        if item.get("summary") == entry.get("summary")
+    ]
+    print(
+        f"[diagnose] calendars named {entry.get('summary')!r}: "
+        + ", ".join(
+            f"{item.get('id')}"
+            f"{' (configured)' if item.get('id') == calendar_id else ''}"
+            f" hidden={item.get('hidden', False)}"
+            f" selected={item.get('selected', False)}"
+            f" deleted={item.get('deleted', False)}"
+            for item in namesakes
+        )
+    )
+
     events = paged(
         provision,
         token,
