@@ -152,6 +152,39 @@ def request_json(
         )
 
 
+# Must match REQUESTED_SCOPES in caldir-provider-google/src/constants.rs of
+# the pinned caldir commit (caldir/Dockerfile verifies the binary has them).
+REQUIRED_SCOPES = frozenset({
+    "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.calendars",
+})
+
+
+def check_refreshed_scopes(refreshed: dict) -> None:
+    """Fail if Google says the refreshed token lost a required scope.
+
+    RFC 6749 section 5.1 lets the response omit `scope` when it is unchanged;
+    then the recorded granted_scopes stay authoritative. When present, it is
+    what the new access token can do. Scopes are never written back here:
+    only a fresh `caldir connect` may change granted_scopes.
+    """
+    scope = refreshed.get("scope")
+
+    if not scope:
+        return
+
+    missing = REQUIRED_SCOPES - set(scope.split())
+
+    if missing:
+        fail(
+            "refreshed Google token is missing scopes: "
+            + ", ".join(sorted(missing))
+            + "; reconnect with caldir connect"
+        )
+
+
 def parse_expiry(value: str) -> datetime:
     value = value.strip()
 
@@ -256,14 +289,7 @@ def get_access_token() -> tuple[str, dict]:
         )
     )
 
-    required = {
-        "https://www.googleapis.com/auth/tasks",
-        "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-        "https://www.googleapis.com/auth/calendar.calendars",
-    }
-
-    missing = required - scopes
+    missing = REQUIRED_SCOPES - scopes
 
     if missing:
         fail(
@@ -339,6 +365,8 @@ def get_access_token() -> tuple[str, dict]:
             "Google refresh response "
             "did not contain access_token"
         )
+
+    check_refreshed_scopes(refreshed)
 
     new_expiry = (
         datetime.now(timezone.utc)
@@ -501,6 +529,24 @@ def list_calendars(
             return result
 
 
+def warn_if_not_visible(calendar: dict) -> None:
+    # Events written to a hidden or unselected calendar exist but are not
+    # shown in the Google Calendar UI. Report it; never change user settings.
+    if calendar.get("hidden"):
+        print(
+            "[google-provision] WARNING calendar "
+            f"{WINDOWS_CALENDAR_NAME!r} is hidden in the calendar list",
+            file=sys.stderr,
+        )
+
+    if not calendar.get("selected", False):
+        print(
+            "[google-provision] WARNING calendar "
+            f"{WINDOWS_CALENDAR_NAME!r} is not selected (not displayed)",
+            file=sys.stderr,
+        )
+
+
 def ensure_windows_calendar(
     token: str,
 ) -> str:
@@ -539,6 +585,8 @@ def ensure_windows_calendar(
             f"calendar exists: "
             f"{WINDOWS_CALENDAR_NAME}"
         )
+
+        warn_if_not_visible(calendar)
 
         return calendar["id"]
 
