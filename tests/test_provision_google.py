@@ -191,7 +191,9 @@ class DiagnoseGoogleTest(unittest.TestCase):
         )
         write(
             self.root / "unab-windows" / "b.ics",
-            "BEGIN:VEVENT\nUID:w2\nX-GOOGLE-EVENT-ID:ev2\nEND:VEVENT\n",
+            # caldir folds long lines; the id must be unfolded to match.
+            "BEGIN:VEVENT\nUID:w2\nX-GOOGLE-EVENT-ID:_elfm6sj1etm6ash\n"
+            " dhnm6obc\nEND:VEVENT\n",
         )
         write(
             self.root / "unab" / "t.ics",
@@ -218,7 +220,7 @@ class DiagnoseGoogleTest(unittest.TestCase):
             ]},
             "/events": {"items": [
                 {"id": "ev1", "status": "cancelled"},
-                {"id": "ev2", "status": "confirmed",
+                {"id": "_elfm6sj1etm6ashdhnm6obc", "status": "confirmed",
                  "start": {"dateTime": "2026-11-02T10:00:00-03:00"}},
             ]},
             "/tasks": {"items": [{"id": "task1", "status": "completed"}]},
