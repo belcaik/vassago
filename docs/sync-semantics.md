@@ -210,9 +210,13 @@ Canonical `<course>__windows/` -> the Google Calendar mirror directory, default
 
 **Canonical is authoritative.** There is no field-level two-way merge and no
 `COMMON_FIELDS` set. Every write direction is canonical -> Google, via
-`merge_canonical_into_google` (`:264-305`), which takes the entire canonical
-VEVENT body and re-attaches only the `X-GOOGLE-*` lines from the Google file.
-Any other Google-side edit is discarded. The code says so at `:495-496`:
+`merge_canonical_into_google`, which takes the entire canonical VEVENT body and
+re-attaches the `X-GOOGLE-*` lines from the Google file, plus the
+Google-assigned properties in `GOOGLE_ASSIGNED` (`ORGANIZER`) when the
+canonical file does not set them. Any other Google-side edit is discarded.
+Keeping `ORGANIZER` matters: caldir writes it back after every push but never
+sends it, so dropping it re-armed an update for every window on every run
+(the `Pushed: 57 updated` symptom of the 2026-10 incident). The code says so at `:495-496`:
 
 ```
 # u_crawler/Canvas is authoritative for delivery windows.
@@ -220,8 +224,9 @@ Any other Google-side edit is discarded. The code says so at `:495-496`:
 ```
 
 `semantic_hash` (`:145-160`) is identical in shape to the VTODO one: all
-properties except `IGNORE_FOR_HASH` (`DTSTAMP`, `LAST-MODIFIED`, `SEQUENCE`)
-and `X-GOOGLE-*`.
+properties except `IGNORE_FOR_HASH` (`DTSTAMP`, `LAST-MODIFIED`, `SEQUENCE`),
+`GOOGLE_ASSIGNED` and `X-GOOGLE-*`. Because the hash rule changed, the first
+run after the upgrade rewrites each window's mirror once.
 
 ### Decision table
 

@@ -146,7 +146,7 @@ Los comandos están en [docs/operations.md](../operations.md) y
 
 - Vassago: volver a desplegar la imagen anterior (se conserva la etiqueta
   previa; ver migración) o `git checkout main` y reconstruir.
-- Caldir: el Dockerfile fija un SHA; volver a `02ee000…` reconstruye el
+- Caldir: el Dockerfile fija un SHA (`3b32b5c…`); volver a `02ee000…` reconstruye el
   binario anterior. Las bases que la versión nueva haya olvidado solo
   afectan a elementos ya borrados en ambos lados.
 - Ningún paso borra estado, volúmenes ni datos remotos.
