@@ -1,6 +1,7 @@
 # ADR-0001: Filesystem ICS as the integration bus
 
 - Status: Accepted (retroactive — documents a decision already implemented)
+- Amended by [ADR-0009](0009-structural-course-discovery.md): structural course discovery replaces the hardcoded term prefix.
 - Date: 2026-08-26
 
 ## Context
