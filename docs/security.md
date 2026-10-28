@@ -16,6 +16,11 @@ kept out of git. Document reflects tracked files only; see
 | `caldir/calendars/` | All ICS data (u_crawler output, canonical collections, Google-mirror working copies) plus each collection's `.caldir/config.toml`, which embeds `caldav_account`/`caldav_calendar_url` or `google_account`/`google_resource_id` | `caldir`, `merge-ucrawler.py`, `provision-radicale.sh`, `provision-google.py`, both bridges |
 | `u-crawler/config/` | u_crawler's own credentials/config for the LMS it crawls | `u-crawler` container only (not read by `caldir`) |
 
+Inside the `caldir` container only (under `/run`, never on a bind mount): `/run/caldir/cron.env` holds the allowlisted container environment,
+including `RADICALE_PASSWORD`, so cron jobs can run. `entrypoint.sh` writes it
+`0600` in a `0700` directory and never prints values; `cron-run.sh` refuses it
+unless it is a regular file owned by the invoking user (root) with mode `0600`.
+
 ## Access model
 
 Radicale authenticates with htpasswd (`radicale/config/config`:

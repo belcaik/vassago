@@ -6,7 +6,7 @@ repeat them.
 
 All output shown here appears in the `caldir` container log: `entrypoint.sh`
 points cron's stdout and stderr at `/proc/1/fd/1` and `/proc/1/fd/2`
-(`caldir/entrypoint.sh:10`). Grep by [log prefix](architecture.md#conventions).
+(`caldir/entrypoint.sh:62`). Grep by [log prefix](architecture.md#conventions).
 
 ## Bridge conflicts
 

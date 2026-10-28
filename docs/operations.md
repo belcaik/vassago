@@ -18,18 +18,26 @@ docker build -t localhost/calendar-caldir:vtodo-support caldir/
 podman build -t localhost/calendar-caldir:vtodo-support caldir/
 ```
 
-The build stage clones `https://github.com/belcaik/caldir.git` at
-`--branch vtodo-support` with `--depth 1` (`caldir/Dockerfile:10-14`). That
-branch is not pinned to a commit, so rebuilding at a different time can pull
-different upstream code even with an unchanged `Dockerfile`.
+The build stage fetches exactly `ARG CALDIR_COMMIT` (a full SHA) from
+`ARG CALDIR_REPO` (`https://github.com/belcaik/caldir.git`), fails unless
+`HEAD` equals it, and fails unless `caldir-provider-google` carries all four
+OAuth scopes. To pick up a fork change, bump the `CALDIR_COMMIT` default in
+`caldir/Dockerfile` (or pass `--build-arg CALDIR_COMMIT=<sha>`); an unchanged
+value reuses the cached compile layer. Pass
+`--build-arg VASSAGO_REVISION="$(git rev-parse HEAD)"` to record this repo's
+revision too. The image records what went in at
+`/usr/local/share/caldir/BUILD_INFO` and in the `io.vassago.caldir.commit`
+label. See [ADR-0008](adr/0008-caldir-pinned-to-a-commit.md).
 
 ## First run
 
-On container start, `entrypoint.sh` writes the cron schedule from
-`CRON_SCHEDULE` into `/etc/cron.d/caldir` (running `run-sync.sh` as root,
-output redirected to the container's stdout/stderr via `/proc/1/fd/1` and
-`/proc/1/fd/2`), then checks `RUN_ON_START`. In `compose.yaml` this is set to
-`"true"`, so on every container start `run-sync.sh` runs once immediately
+On container start, `entrypoint.sh` snapshots the pipeline's environment into
+`/run/caldir/cron.env` and writes the cron schedule from `CRON_SCHEDULE` into
+`/etc/cron.d/caldir` (running `cron-run.sh` as root, which restores that
+environment, takes a lock and execs `run-sync.sh`; output redirected to the
+container's stdout/stderr via `/proc/1/fd/1` and `/proc/1/fd/2`), then checks
+`RUN_ON_START`. In `compose.yaml` this is set to `"true"`, so on every
+container start `cron-run.sh` runs once immediately
 (errors from this initial run are swallowed with `|| true` — the container
 still proceeds to `exec cron -f`). Expect the first run to take longer than
 later ones, since `provision-radicale.sh` and `provision-google.py` create
@@ -48,8 +56,10 @@ docker compose exec caldir /usr/local/bin/run-sync.sh
 podman compose exec caldir /usr/local/bin/run-sync.sh
 ```
 
-This runs as root inside the container, the same as the cron-triggered
-invocation. Outside of manual runs, cron re-triggers `run-sync.sh`
+This runs as root inside the container with the environment `compose exec`
+provides. It does not take the run lock; to avoid racing a running cron job,
+run `/usr/local/bin/cron-run.sh`, which skips (exit 0)
+while another run holds the lock. Outside of manual runs, cron re-triggers `cron-run.sh`
 automatically every `CRON_SCHEDULE` (`*/15 * * * *` in `compose.yaml` — every
 15 minutes).
 
