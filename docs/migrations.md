@@ -8,7 +8,7 @@ without manual edits inside containers. Each section is self-contained.
 From: any image built from `main` up to `2f3f0f4`, possibly with hand-made
 hotfixes inside the running container.
 To: `refactor/sync-discovery` (ADR-0008, ADR-0009), caldir fork commit
-`564203d59aabd7a3b6fe08daf96ffa031e95f322`.
+`3b32b5ceceac50038d504cf8c8127af4ef6c58bd`.
 
 Nothing here deletes state, volumes or remote data. Every step before
 "Switch" is read-only for Google.
@@ -75,7 +75,7 @@ podman run --rm --entrypoint cat localhost/calendar-caldir:vtodo-support \
     /usr/local/share/caldir/BUILD_INFO
 ```
 
-`caldir_commit` must be `564203d59aabd7a3b6fe08daf96ffa031e95f322`. The build
+`caldir_commit` must be `3b32b5ceceac50038d504cf8c8127af4ef6c58bd`. The build
 already failed if any of the four OAuth scopes were missing.
 
 ### 4. Baseline diagnosis with the new image, before switching (GET only)
