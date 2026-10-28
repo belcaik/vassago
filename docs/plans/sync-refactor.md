@@ -29,6 +29,7 @@
 | B2 | Pérdida de `granted_scopes` | `caldir-provider-google/src/session/store.rs::refresh_local` reconstruía `SessionData` desde la respuesta; con `scope` omitido (permitido por RFC 6749 §5.1) `granted_scopes` quedaba vacío. `provision-google.py` en cambio conserva los scopes (solo reescribe token y expiración). |
 | C | Cron sin `RADICALE_USER`, logs en UTC | `entrypoint.sh` escribía `/etc/cron.d/caldir` sin entorno; cron arranca los jobs con entorno vacío. `RUN_ON_START` sí heredaba el entorno de Compose. |
 | D | 57 restaurados / 57 borrados por ejecución | Las *sync bases* de Caldir eran append-only (`SyncBases::record` solo inserta; nada borra). Tras un borrado remoto, el bridge restaura el archivo con el mismo UID; en fase 2 `CalendarDiff::compute_with` ve "local presente, remoto ausente, base presente" ⇒ borrado remoto ⇒ borra el archivo local. Se repite cada ejecución. `run-sync.sh` no comprobaba el estado final y decía `done`. |
+| D-pag | Las tareas "desaparecen" de Google sin que nadie las borre | `caldir-provider-google/src/google_tasks/client.rs::list_tasks` hace un solo `GET tasks.list` sin `maxResults` ni `nextPageToken`: la API devuelve 20 por página, el resto parece borrado en remoto. Con ~77 tareas faltan exactamente 57. Es la causa más probable de que "desaparecieran" en primer lugar. Además, **corregir solo las bases sin paginar crearía 57 duplicados por ejecución**, por eso ambas correcciones van juntas. |
 | D' | `merge-ucrawler` "updated" perpetuo | Comparaba `read_text()` (convierte CRLF→LF) contra una salida CRLF: nunca igual. Ya estaba documentado como deuda en `docs/context-handoff.md`. |
 | D'' | Riesgo de borrado por export vacío | `merge-ucrawler` borraba del canónico todo `assignment-*.ics` ausente del export, incluso con el directorio de u_crawler vacío o a medio escribir. |
 
@@ -40,7 +41,7 @@
 | E2 | "Pushed: 57 updated" sobre eventos borrados (`status=cancelled`) que la actualización no reactiva | `diagnose-google.py` → `events.list?showDeleted=true`, conteo por `status` y destino de cada `X-GOOGLE-EVENT-ID` local. |
 | E3 | Mismo bucle que D en ventanas (restore + borrado en fase 2) | `verify-sync.py` al final de la ejecución; `diagnose-google.py`. |
 | E4 | `google_calendar_id` apunta a otro calendario homónimo | `diagnose-google.py` imprime `summary`/`accessRole` del ID configurado. |
-| D0 | Por qué desaparecieron las 57 tareas de Google la primera vez | `diagnose-google.py` (`tasks.list?showDeleted=true&showHidden=true`). No se puede deducir del código. |
+| D0 | Cuántas tareas tiene realmente la lista (confirma la causa D-pag) | `diagnose-google.py` (`tasks.list` paginado, con `showDeleted/showHidden/showCompleted`). |
 
 ## 2. Arquitectura propuesta
 
