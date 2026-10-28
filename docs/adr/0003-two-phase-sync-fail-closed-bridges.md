@@ -1,6 +1,7 @@
 # ADR-0003: Two-phase sync with fail-closed bridges
 
 - Status: Accepted (retroactive — documents a decision already implemented)
+- Amended by [ADR-0009](0009-structural-course-discovery.md): `verify-sync.py` now runs after phase 2 as the final pipeline step.
 - Date: 2026-08-26
 
 ## Context

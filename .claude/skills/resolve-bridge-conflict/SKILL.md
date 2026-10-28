@@ -62,9 +62,11 @@ bridge compares each side against the same stored hash.
 docker compose exec caldir /usr/local/bin/run-sync.sh
 ```
 
-The run is clean when the log reaches `phase 2: publish bridge results` and
-then `[caldir] … done`. Stopping before phase 2 means a conflict remains — go
-back to step 1 with the new UID.
+The run is clean when the log reaches `phase 2: publish bridge results`, the
+`[verify]` check passes, and then `[caldir] … done` appears. Stopping before
+phase 2 means a conflict remains — go back to step 1 with the new UID. Exit 3
+from verification is a convergence failure, not a bridge conflict; see
+[docs/troubleshooting.md](../../../docs/troubleshooting.md#verification-fails-with-exit-3).
 
 ## Duplicate UIDs
 
@@ -78,6 +80,7 @@ rest — see
 
 `dedupe-vtodo.py` is **not** in the caldir image: `caldir/Dockerfile` does not
 COPY it. It also hardcodes its paths, so it must run inside the container
-against `/data/calendars`. Getting it in there — copying the file into the
-running container or exposing it through a bind mount — is the operator's
-choice; ask rather than inventing one. Re-run `run-sync.sh` afterwards.
+against `/data/calendars`, with its `courses.py` dependency copied alongside it.
+Getting both files in there — copying them into the running container or
+exposing them through a bind mount — is the operator's choice; ask rather than
+inventing one. Re-run `run-sync.sh` afterwards.

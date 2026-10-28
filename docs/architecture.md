@@ -19,7 +19,7 @@ Three services, defined in `compose.yaml` (project name `calendar`, network
 | Service | Image | Role | Schedule | Volumes (host -> container) |
 | --- | --- | --- | --- | --- |
 | `radicale` | `ghcr.io/kozea/radicale:stable` | CalDAV hub; the endpoint CalDAV clients (Thunderbird, phones) subscribe to. Port 5232 is bound to the host address configured in `compose.yaml`; inside the container Radicale listens on `0.0.0.0:5232` (`radicale/config/config:2`). | always on (`restart: unless-stopped`) | `./radicale/config` -> `/etc/radicale` (`ro,Z`), `./radicale/data` -> `/var/lib/radicale` (`Z,U`) |
-| `caldir` | `localhost/calendar-caldir:vtodo-support` | Runs the whole sync pipeline: provisioning, merge, `caldir sync`, the two bridges. Built from `caldir/Dockerfile`. | cron `*/15 * * * *`, plus one run at container start (`RUN_ON_START=true`) | `./caldir/config` -> `/data/.config/caldir` (`Z`), `./caldir/state` -> `/data/.local/share/caldir` (`Z`), `./caldir/calendars` -> `/data/calendars` (`z`) |
+| `caldir` | `localhost/calendar-caldir:vtodo-support` | Runs the whole sync pipeline: provisioning, merge, `caldir sync`, the two bridges, and final convergence verification. Built from `caldir/Dockerfile`. | cron `*/15 * * * *`, plus one run at container start (`RUN_ON_START=true`) | `./caldir/config` -> `/data/.config/caldir` (`Z`), `./caldir/state` -> `/data/.local/share/caldir` (`Z`), `./caldir/calendars` -> `/data/calendars` (`z`) |
 | `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1` | External LMS scraper. Writes source ICS files into the shared calendars volume. | cron `0 5 * * *`, plus one run at container start | `./u-crawler/config` -> `/home/appuser/.config/u_crawler` (`Z`), `./caldir/calendars` -> `/home/appuser/Caldir` (`z`) |
 
 `caldir` declares `depends_on: radicale`. `compose.yaml` has no `build:` key for
@@ -59,15 +59,15 @@ scope here.
                               v
                         [ u-crawler ]                  cron 0 5 * * *
                               |
-                writes 202615_<course>/deadlines/*.ics   (VTODO)
-                       202615_<course>/windows/*.ics     (VEVENT)
+                writes <course>/deadlines/*.ics   (VTODO)
+                       <course>/windows/*.ics     (VEVENT)
                               |
             ./caldir/calendars  (volume shared by both containers)
                               |
                               v
                      [ merge-ucrawler.py ]              cron */15 * * * *
                               |
-       canonical: 202615_<course>__deadlines/  202615_<course>__windows/
+       canonical: <course>__deadlines/  <course>__windows/
                               |
              +----------------+-----------------------+
              |                                        |
@@ -80,8 +80,11 @@ scope here.
                                                     |
                                           caldir sync (phase 2)
                                           provider = "google"
+                                                    |
                                                     v
                                           Google Tasks / Google Calendar
+                                                    |
+                                          verify-sync.py (convergence)
 ```
 
 ### The pipeline
@@ -109,10 +112,15 @@ scope here.
 7. **Phase 2: publish bridge results** — `cd /data/calendars && caldir sync`
    again (`caldir/run-sync.sh:48-50`). The bridges only edited local files; this
    second sync is what pushes those edits out to Radicale and Google.
+8. **Verify convergence** — `verify-sync.py` checks every managed canonical UID
+   within caldir's default ±365-day window. Each must have a Google mirror file
+   carrying `X-GOOGLE-TASK-ID` or `X-GOOGLE-EVENT-ID`; otherwise verification
+   exits 3 (`caldir/run-sync.sh:52-55`).
 
 The two phases exist because the bridges sit between them: phase 1 fetches, the
 bridges decide, phase 2 publishes. A conflict in either bridge stops the run
-before phase 2, so nothing is published that run. See
+before phase 2, so nothing is published that run. Verification runs last, and
+`[caldir] … done` is printed only after it passes. See
 [Exit codes](sync-semantics.md#exit-codes).
 
 cron starts jobs with an empty environment, so `entrypoint.sh` first snapshots
@@ -140,12 +148,18 @@ Everything lives under `/data/calendars` in the `caldir` container
 
 | Path pattern | Kind | Created by | `.caldir/config.toml` |
 | --- | --- | --- | --- |
-| `202615_<course>/deadlines/*.ics` | source (VTODO, one per assignment) | `u-crawler` | none — not a caldir collection |
-| `202615_<course>/windows/*.ics` | source (VEVENT, delivery windows) | `u-crawler` | none — not a caldir collection |
-| `202615_<course>__deadlines/` | canonical | directory by `merge-ucrawler.py` (`caldir/merge-ucrawler.py:146-147`) and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
-| `202615_<course>__windows/` | canonical | directory by `merge-ucrawler.py` (`caldir/merge-ucrawler.py:207-208`) and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
-| `unab/` | mirror (Google Tasks) | `provision-google.py` (`caldir/provision-google.py:582-631`) | google tasklist, see below |
-| `unab-windows/` | mirror (Google Calendar) | `provision-google.py` (`caldir/provision-google.py:634-682`) | google calendar, see below |
+| `<course>/deadlines/*.ics` | source (VTODO, one per assignment) | `u-crawler` | none — not a caldir collection |
+| `<course>/windows/*.ics` | source (VEVENT, delivery windows) | `u-crawler` | none — not a caldir collection |
+| `<course>__deadlines/` | canonical | directory by `merge-ucrawler.py` and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
+| `<course>__windows/` | canonical | directory by `merge-ucrawler.py` and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
+| `unab/` | mirror (Google Tasks) | `provision-google.py` | google tasklist, see below |
+| `unab-windows/` | mirror (Google Calendar) | `provision-google.py` | google calendar, see below |
+
+`caldir/courses.py` discovers source courses by this structure, not by an
+academic term prefix. Only a non-empty export causes its canonical directory
+and Radicale collection to be created. Existing canonical collections are still
+scanned when their source is empty or gone, which keeps old terms visible to the
+bridges until an operator deliberately removes them.
 
 The `unab/` and `unab-windows/` slugs are the defaults of
 `GOOGLE_UNAB_TASKLIST_SLUG` and `GOOGLE_UNAB_WINDOWS_SLUG`.
@@ -250,12 +264,11 @@ windows are managed when the UID starts with `u_crawler-window-`
 (`caldir/bridge-windows.py:36`). Items carrying any other UID — a personal
 Google task, for instance — are skipped by both bridges and never modified.
 
-**Term prefix.** `202615_` is hardcoded in five scripts:
-`caldir/provision-radicale.sh:79`, `caldir/merge-ucrawler.py:140` and `:201`,
-`caldir/bridge-vtodo.py:379` and `:827`, `caldir/bridge-windows.py:167` and
-`:558`, `caldir/dedupe-vtodo.py:36`. All five must move together when the term
-changes. That `202615` denotes an academic term identifier is an assumption;
-nothing in the repository states its meaning.
+**Course discovery.** `caldir/courses.py` treats a top-level directory with a
+non-empty `deadlines/` or `windows/` export as a source course. No academic
+term code is hardcoded; a directory such as `202625_<course>` is only an example.
+Canonical `<course>__deadlines/` and `<course>__windows/` collections remain
+visible to the bridges even after their source export disappears.
 
 **Log prefixes.** Every script tags its output, which makes the pipeline
 greppable in the container log:
@@ -268,6 +281,8 @@ greppable in the container log:
 | `[u_crawler-merge]` | `merge-ucrawler.py` |
 | `[bridge]` | `bridge-vtodo.py` |
 | `[windows-bridge]` | `bridge-windows.py` |
+| `[verify]` | `verify-sync.py` |
+| `[diagnose]` | `diagnose-google.py` |
 | `[dedupe]` | `dedupe-vtodo.py` |
 
 **Atomic writes.** Every ICS and state write goes to a temp file beside the

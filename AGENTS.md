@@ -20,8 +20,11 @@ Each step aborts the run on failure (`set -eu`):
 5. `bridge-vtodo.py` — deadlines ↔ Google Tasks; a non-zero rc (2 on conflicts) ends the run with that rc.
 6. `bridge-windows.py` — windows → Google Calendar; same rc handling.
 7. `caldir sync` — phase 2, publish bridge results.
+8. `verify-sync.py` — exit 3 if a managed canonical UID within ±365 days is
+   missing from its Google mirror or lacks its Google provider id.
 
-A successful run ends with a `[caldir] … done` line.
+A successful run ends with a `[caldir] … done` line only after verification
+passes.
 
 ## Directory layout
 
@@ -30,10 +33,10 @@ Host paths under `caldir/calendars/`, mounted at `/data/calendars` in the
 
 | Path | Written by | Contents |
 | --- | --- | --- |
-| `202615_<course>/deadlines/` | u_crawler | VTODO source of truth for assignments |
-| `202615_<course>/windows/` | u_crawler | VEVENT delivery windows |
-| `202615_<course>__deadlines/` | merge-ucrawler + provision-radicale | canonical VTODO collection, CalDAV-backed |
-| `202615_<course>__windows/` | merge-ucrawler + provision-radicale | canonical VEVENT collection, CalDAV-backed |
+| `<course>/deadlines/` | u_crawler | VTODO source of truth for assignments |
+| `<course>/windows/` | u_crawler | VEVENT delivery windows |
+| `<course>__deadlines/` | merge-ucrawler + provision-radicale | canonical VTODO collection, CalDAV-backed |
+| `<course>__windows/` | merge-ucrawler + provision-radicale | canonical VEVENT collection, CalDAV-backed |
 | `unab/` | provision-google + bridge-vtodo | Google Tasks mirror |
 | `unab-windows/` | provision-google + bridge-windows | Google Calendar mirror |
 
@@ -51,16 +54,17 @@ Host paths under `caldir/calendars/`, mounted at `/data/calendars` in the
 
 - ALWAYS run `sh scripts/check.sh` before claiming a change works. See
   [.claude/skills/validate-vassago/SKILL.md](.claude/skills/validate-vassago/SKILL.md).
-- ALWAYS keep the `202615_` term prefix byte-identical across the five scripts
-  that hardcode it: `provision-radicale.sh`, `merge-ucrawler.py`,
-  `bridge-vtodo.py`, `bridge-windows.py`, `dedupe-vtodo.py`. `scripts/check.sh`
-  enforces this.
+- ALWAYS discover courses structurally through `caldir/courses.py`; NEVER
+  hardcode an academic term code. `scripts/check.sh` step 4 rejects any
+  `NNNNNN_` literal in `caldir/*.py` and `caldir/*.sh`.
 - ALWAYS keep the step order in `caldir/run-sync.sh` as listed above; the two
-  `caldir sync` phases bracket the bridges by design.
+  `caldir sync` phases bracket the bridges by design, and `verify-sync.py` is
+  always the final step.
 - ALWAYS stay on stdlib Python 3 and POSIX `sh`. Adding a dependency means
   changing `caldir/Dockerfile`, which is out of bounds without an ADR.
 - ALWAYS treat `caldir/dedupe-vtodo.py` as a manual repair tool: it is not
-  COPY'd into the image and not part of the pipeline.
+  COPY'd into the image and not part of the pipeline. It imports `courses.py`,
+  so copy both files when using it manually.
 - NEVER commit, print, or read back the gitignored secret and runtime paths:
   `.env`, `radicale/config/users`, `radicale/data/`, `caldir/config/`,
   `caldir/state/`, `caldir/calendars/`, `u-crawler/config/`, and any

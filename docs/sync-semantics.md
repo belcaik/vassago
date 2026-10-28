@@ -14,74 +14,85 @@ For where these run in the pipeline, see
 
 ## merge-ucrawler.py
 
-Source: `202615_<course>/deadlines/` and `202615_<course>/windows/`.
-Target: `202615_<course>__deadlines/` and `202615_<course>__windows/`.
-Root is `CALENDAR_ROOT`, default `/data/calendars`
-(`caldir/merge-ucrawler.py:9`).
+Source: `<course>/deadlines/` and `<course>/windows/`.
+Target: `<course>__deadlines/` and `<course>__windows/`.
+Root is `CALENDAR_ROOT`, default `/data/calendars`.
+
+`caldir/courses.py` discovers a source course structurally: it is a top-level
+directory whose `deadlines/` or `windows/` export contains at least one `.ics`.
+Course names must match `[A-Za-z0-9][A-Za-z0-9._-]*`; no academic term code is
+hardcoded. Canonical collections are discovered by suffix independently of the
+source export, so old terms remain visible to the bridges. Canonical directories
+and Radicale collections are created only for non-empty exports.
 
 ### Deadlines (VTODO)
 
-Per source file (`caldir/merge-ucrawler.py:159-181`):
+Per source file:
 
 | Case | Action |
 | --- | --- |
 | target file absent | copy source verbatim, count as created |
 | target file present | `merge_vtodo(source, existing)`; write only if the result differs from the existing content |
 
-`merge_vtodo` (`caldir/merge-ucrawler.py:80-118`) rebuilds the VTODO body from
-the **source**, dropping every source line whose property name is in
-`USER_STATE_FIELDS`, and appends the **existing** file's lines for those same
-fields:
+`merge_vtodo` rebuilds the VTODO body from the **source**, dropping every source
+line whose property name is in `USER_STATE_FIELDS`, and appends the **existing**
+file's lines for those same fields:
 
 ```
 USER_STATE_FIELDS = {"STATUS", "COMPLETED", "PERCENT-COMPLETE"}
 ```
 
 Those three are what Thunderbird or Google Tasks write when the user ticks a
-task off (`caldir/merge-ucrawler.py:11-17`). Everything else — `SUMMARY`,
-`DESCRIPTION`, `DUE`, `URL`, and any other property — comes from u_crawler and
-overwrites whatever was in the canonical file.
+task off. Everything else — `SUMMARY`, `DESCRIPTION`, `DUE`, `URL`, and any
+other property — comes from u_crawler and overwrites whatever was in the
+canonical file.
 
 Lines outside the `BEGIN:VTODO` / `END:VTODO` range are taken from the source
 as well, so calendar-level properties follow u_crawler.
 
 A `merge_vtodo` failure (for example, no VTODO component in either file) is
-re-raised as `RuntimeError: failed merging <source> -> <target>: ...`
-(`caldir/merge-ucrawler.py:175-178`), which aborts the run.
+re-raised as `RuntimeError: failed merging <source> -> <target>: ...`, which
+aborts the run.
 
-Note: the "write only if the result differs" comparison is between the CRLF
-output of `merge_vtodo` and `read_text()`'s LF-normalised view of the existing
-file, so it never compares equal. In practice every canonical deadline file is
-rewritten (with identical bytes) on every run and reported as `updated`. See
-[context-handoff](context-handoff.md#known-fragilities-documented-deliberately-not-fixed-here).
+Existing content is read with `read_bytes()` before UTF-8 decoding, so universal
+newline conversion cannot make an unchanged CRLF file look different. An
+unchanged merge is not rewritten and is not counted as `updated`.
 
 ### Windows (VEVENT)
 
-No field-level merge (`caldir/merge-ucrawler.py:215-224`): if the target is
-absent or its bytes differ from the source, the source overwrites it. Delivery
-windows carry no user state worth preserving.
+No field-level merge: if the target is absent or its content differs from the
+source, the source overwrites it. Delivery windows carry no user state worth
+preserving. This comparison also starts from `read_bytes()` and preserves line
+endings.
 
 ### Deletion rule
 
-Both halves apply the same rule (`caldir/merge-ucrawler.py:184-192`,
-`caldir/merge-ucrawler.py:226-232`): a file in the canonical directory is
-deleted only when **both** hold:
+Both halves consider a canonical file for deletion only when **both** hold:
 
 1. its name starts with `assignment-`, and
-2. no file of that name exists in the source directory.
+2. no file of that name exists in the non-empty source export.
+
+An empty or missing export is not a deletion and removes nothing. In addition,
+a run that would remove more than half of a course's managed files (minimum 2)
+is held back with `WARNING holding N/M removals` unless
+`MERGE_ALLOW_MASS_DELETE=1` is set for that run.
 
 Any other `.ics` in a canonical directory — a personal event, a hand-written
 task — is never removed. The Spanish comment states the intent directly:
 "Sólo eliminamos archivos pertenecientes al esquema de u_crawler."
 
+Before each kind is merged, `check_unique_uids` scans all of its source export
+files. Two files carrying the same UID abort with `duplicate u_crawler UID`
+before that kind writes anything.
+
 ### Writes
 
-`atomic_write` (`caldir/merge-ucrawler.py:121-132`) writes `<name>.ics.tmp` and
-`os.replace()`s it over the target, creating parent directories as needed.
+`atomic_write` writes `<name>.ics.tmp` and `os.replace()`s it over the target,
+creating parent directories as needed.
 
 ## bridge-vtodo.py
 
-Canonical `202615_*__deadlines/` <-> the Google Tasks mirror directory,
+Canonical `<course>__deadlines/` <-> the Google Tasks mirror directory,
 default `<CALENDAR_ROOT>/unab` (`GOOGLE_TASKS_DIR`,
 `caldir/bridge-vtodo.py:23-28`).
 
@@ -192,7 +203,7 @@ A duplicate managed UID on either side raises `RuntimeError`
 
 ## bridge-windows.py
 
-Canonical `202615_*__windows/` -> the Google Calendar mirror directory, default
+Canonical `<course>__windows/` -> the Google Calendar mirror directory, default
 `<CALENDAR_ROOT>/unab-windows` (`GOOGLE_WINDOWS_DIR`,
 `caldir/bridge-windows.py:22-27`). Managed prefix: `u_crawler-window-`
 (`:36`).
@@ -235,24 +246,23 @@ emits only two CONFLICT messages where the VTODO bridge emits five.
 
 ## dedupe-vtodo.py
 
-A **manual** repair tool. It is not COPY'd into the image
-(`caldir/Dockerfile:86-93`) and `run-sync.sh` never calls it. To use it, run it
-by hand inside the container with the file mounted or copied in.
+A **manual** repair tool. It is not COPY'd into the image and `run-sync.sh`
+never calls it. To use it, run it by hand inside the container with both
+`dedupe-vtodo.py` and its `courses.py` dependency mounted or copied in.
 
-Paths are hardcoded with no environment overrides
-(`caldir/dedupe-vtodo.py:11-12`):
+Paths are hardcoded with no environment overrides:
 
 - root `/data/calendars`
 - quarantine `/data/.local/share/caldir/quarantine-vtodo`
 
-For each `202615_*__deadlines/` directory it groups `.ics` files by managed UID,
-matched against `^UID:(u_crawler-todo-(\d+)@u-crawler\.local)\s*$` (`:14-17`),
-and processes only groups holding more than one file (`:51-53`).
+For each `<course>__deadlines/` directory it groups `.ics` files by managed UID,
+matched against `^UID:(u_crawler-todo-(\d+)@u-crawler\.local)\s*$`, and processes
+only groups holding more than one file.
 
 ### Keeper selection
 
 The assignment id is extracted from the UID, giving the expected filename
-`assignment-<id>.ics` (`:57-64`). Then, in order (`:67-83`):
+`assignment-<id>.ics`. Then, in order:
 
 | Condition | Keeper |
 | --- | --- |
@@ -261,35 +271,52 @@ The assignment id is extracted from the UID, giving the expected filename
 | neither exists | **fail closed**: print `[dedupe] SKIP <uid>: authoritative source not found` and leave the whole group untouched |
 
 The fail-closed branch is the point of the tool: with no authoritative
-u_crawler source, it refuses to pick a winner rather than guessing (`:76-78`).
+u_crawler source, it refuses to pick a winner rather than guessing.
 
 Every non-keeper file in the group is `shutil.move`d to
 `/data/.local/share/caldir/quarantine-vtodo/<course>/<assignment_id>/`, with a
-`.1`, `.2`, … suffix inserted if a name is already taken there (`:88-110`).
+`.1`, `.2`, … suffix inserted if a name is already taken there.
 Nothing is deleted. The script always returns 0.
+
+## Phase 2 and convergence
+
+The caldir fork forgets a sync base after an applied delete. When a bridge
+restores an item whose Google copy was deleted, phase 2 therefore treats the
+restoration as a Create instead of interpreting it as another remote deletion
+and deleting the local file again. The bridge authority rules are unchanged.
+
+`verify-sync.py` then checks every managed canonical UID within caldir's default
+±365-day sync window. A matching Google mirror file must exist and carry
+`X-GOOGLE-TASK-ID` for a deadline or `X-GOOGLE-EVENT-ID` for a window. Items
+outside that window are skipped. The check is read-only and runs after phase 2;
+`[caldir] … done` is printed only when it passes.
 
 ## Exit codes
 
-Both bridges return `2 if conflicts else 0`
-(`caldir/bridge-vtodo.py:848`, `caldir/bridge-windows.py:581`). A crash — most
-commonly the duplicate-UID `RuntimeError` — propagates as a Python traceback and
-the usual interpreter exit code 1.
+Both bridges return `2 if conflicts else 0`. A crash — most commonly a
+duplicate-UID `RuntimeError` — propagates as a Python traceback and the usual
+interpreter exit code 1.
 
 | Code | Meaning | Effect on `run-sync.sh` |
 | --- | --- | --- |
 | 0 | reconciliation completed, no conflicts | pipeline continues |
-| 2 | at least one conflict; every non-conflicting UID was still reconciled and its state recorded | the run logs `[caldir] VTODO bridge failed/conflicted (rc=2)` (or `windows bridge …`) to stderr and exits 2 — **phase 2 never runs** (`caldir/run-sync.sh:32-35`, `:43-46`) |
+| 2 | at least one conflict; every non-conflicting UID was still reconciled and its state recorded | the run logs `[caldir] VTODO bridge failed/conflicted (rc=2)` (or `windows bridge …`) to stderr and exits 2 — **phase 2 never runs** |
 | other | hard failure: unparseable ICS, missing Google mirror directory, duplicate managed UID | same handling — the run exits with that code before phase 2 |
 
-Both bridges call `save_state()` before returning (`bridge-vtodo.py:839`,
-`bridge-windows.py:572`), so a conflicting run still persists progress for
-everything it did reconcile. A crashing run does not reach `save_state`, so no
-state is written at all.
+Both bridges call `save_state()` before returning, so a conflicting run still
+persists progress for everything it did reconcile. A crashing run does not reach
+`save_state`, so no state is written at all.
 
 Because phase 2 is what publishes, a single conflict in either bridge blocks
 publication of **all** calendars for that run, including ones with nothing wrong.
 Conflicts are sticky: they recur every 15 minutes until resolved. See
 [Pipeline never reaches phase 2](troubleshooting.md#pipeline-never-reaches-phase-2).
+
+`verify-sync.py` returns 0 when every expected item is published and 3 when any
+item is missing from its mirror or lacks its provider id. Exit 3 ends the run
+without `[caldir] … done`; because verification is last, it does not roll back
+changes already published by phase 2. See
+[Verification fails with exit 3](troubleshooting.md#verification-fails-with-exit-3).
 
 ## State files
 

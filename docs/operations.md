@@ -29,6 +29,40 @@ revision too. The image records what went in at
 `/usr/local/share/caldir/BUILD_INFO` and in the `io.vassago.caldir.commit`
 label. See [ADR-0008](adr/0008-caldir-pinned-to-a-commit.md).
 
+## Disk space on the build host
+
+Check free space and Podman's disk usage before rebuilding:
+
+```sh
+df -h /
+podman system df
+```
+
+Safe cleanup is limited to dangling images and explicitly selected old caldir
+images:
+
+```sh
+podman image prune
+podman images
+podman image rm <old-caldir-image-id>
+```
+
+`podman image prune` without `-a` removes dangling images only. Remove an old
+tagged caldir image only by its explicit id after inspecting `podman images`.
+Never use `podman system prune -a` or any prune with `--volumes`: those can
+remove unrelated images, containers, or volumes on a shared host.
+
+An unchanged pinned `CALDIR_COMMIT` reuses the compiled Rust layer, so changes
+limited to the pipeline scripts do not recompile Rust. If the build host still
+lacks space, build on the development machine and transfer the image instead:
+
+```sh
+podman build -t localhost/calendar-caldir:vtodo-support caldir/
+podman save localhost/calendar-caldir:vtodo-support | ssh baphomet podman load
+```
+
+Use matching CPU architectures on the two machines.
+
 ## First run
 
 On container start, `entrypoint.sh` snapshots the pipeline's environment into
@@ -79,14 +113,17 @@ Every line is prefixed by the stage that produced it:
 | `[u_crawler-merge]` | `merge-ucrawler.py` |
 | `[bridge]` | `bridge-vtodo.py` |
 | `[windows-bridge]` | `bridge-windows.py` |
+| `[verify]` | `verify-sync.py` (post-publication convergence check) |
+| `[diagnose]` | `diagnose-google.py` (manual read-only diagnosis) |
 
 A healthy run shows this order: `[caldir]` provisioning messages, then
 `[provision]`/`[google-provision]`, then `[u_crawler-merge]`, then `[caldir]
 phase 1: sync providers`, then `[bridge]` and `[windows-bridge]`, then
-`[caldir] phase 2: publish bridge results`, ending in `[caldir] ... done`
-(`caldir/run-sync.sh`). The pipeline runs under `set -eu` and stops at the
-first failing step — a run that stops before `phase 2` did not publish
-whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reaches-phase-2`.
+`[caldir] phase 2: publish bridge results`, then `[verify]`, ending in
+`[caldir] ... done` (`caldir/run-sync.sh`). The pipeline runs under `set -eu`
+and stops at the first failing step — a run that stops before `phase 2` did not
+publish whatever the bridges changed, and a verification failure exits 3 without
+printing `done`. See `docs/troubleshooting.md#pipeline-never-reaches-phase-2`.
 
 ## Google OAuth prerequisites
 
@@ -98,9 +135,9 @@ whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reache
   credentials).
 - `session/<GOOGLE_ACCOUNT>.toml` — keys `access_token`, `refresh_token`,
   `expires_at`, `auth_mode`, `granted_scopes`. `auth_mode` must be `"local"`;
-  any other value is a fatal error (`caldir/provision-google.py:247-250`).
+  any other value is a fatal error.
 
-`granted_scopes` must be a superset of:
+`REQUIRED_SCOPES` declares the scopes that `granted_scopes` must contain:
 
 - `https://www.googleapis.com/auth/tasks`
 - `https://www.googleapis.com/auth/calendar.events`
@@ -108,11 +145,32 @@ whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reache
 - `https://www.googleapis.com/auth/calendar.calendars`
 
 `provision-google.py` refreshes the access token itself when it is within 5
-minutes of `expires_at`, rewriting only `access_token` and `expires_at` in
-the session file — it never performs the initial OAuth authorization. That
-first `session/<account>.toml` must be produced by the `caldir`/
-`caldir-provider-google` binary's own OAuth flow, which is outside this
+minutes of `expires_at`. If the refresh response reports `scope`, every required
+scope must be present or provisioning fails; if the response omits `scope`, the
+recorded grants remain authoritative. The script rewrites only `access_token`
+and `expires_at`, never `granted_scopes`, and never performs the initial OAuth
+authorization. That first `session/<account>.toml` must be produced by the
+`caldir`/`caldir-provider-google` binary's own OAuth flow, which is outside this
 repository; consult the `belcaik/caldir` project for how to run it.
+
+Provisioning also warns when the windows calendar is hidden or not selected in
+the user's calendar list. It does not change those visibility settings.
+
+## Diagnose Google mirrors
+
+Run the read-only diagnostic when Google and the local mirrors disagree, or when
+windows do not appear in Google Calendar:
+
+```sh
+podman exec caldir /usr/local/bin/diagnose-google.py
+```
+
+It uses GET requests only to report the windows calendar's `hidden`, `selected`
+and `accessRole` fields, event and task counts by status, and whether each local
+Google provider id is active, cancelled, deleted, or unknown remotely. It never
+creates, updates, or deletes Google data. Its only possible write is the normal
+OAuth access-token refresh shared with provisioning. It prints counts and ids,
+never tokens.
 
 ## Radicale users
 
@@ -134,14 +192,14 @@ and `provision-radicale.sh` creates collections under
 
 ## Term rotation
 
-The literal `202615_` (a course/term prefix) is hardcoded, identically, in
-five scripts: `provision-radicale.sh`, `merge-ucrawler.py`,
-`dedupe-vtodo.py`, `bridge-vtodo.py`, `bridge-windows.py`. When the academic
-term changes, all five must be updated together — `scripts/check.sh` enforces
-that the prefix literal is identical across them (see
-`docs/sync-semantics.md`). Once the prefix is updated and course directories
-matching the new pattern appear under `./caldir/calendars` (written there by
-`u_crawler`), `provision-radicale.sh` and `merge-ucrawler.py` create the
-corresponding Radicale collections and canonical directories automatically on
-the next `run-sync.sh` invocation — no manual collection setup is needed
-beyond updating the prefix.
+A new term needs no code change or image rebuild. `caldir/courses.py` discovers
+any top-level course directory with a non-empty `deadlines/` or `windows/`
+export; a name such as `202625_<course>` is just an example, not a configured
+prefix. On the next run, provisioning and merge create that course's canonical
+directories and Radicale collections automatically.
+
+Old canonical collections remain visible to the bridges when their source export
+becomes empty or disappears. This prevents an old term from looking like a mass
+deletion. Removing an old term from Google is therefore a deliberate manual
+cleanup step, not part of term rotation; do not delete canonical assignments as
+a routine rotation shortcut.

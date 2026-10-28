@@ -19,13 +19,13 @@ prebuilt image.
 ## Data flow
 
 ```
-u_crawler ──ICS──▶ caldir/calendars/202615_<course>/{deadlines,windows}/*.ics
+u_crawler ──ICS──▶ caldir/calendars/<course>/{deadlines,windows}/*.ics
                         │
                         ▼
               merge-ucrawler.py (preserves user STATUS/COMPLETED)
                         │
                         ▼
-         202615_<course>__{deadlines,windows}/  (canonical, caldir-managed)
+         <course>__{deadlines,windows}/  (canonical, caldir-managed)
                  │                      │
                  ▼                      ▼
          caldir sync (phase 1)    caldir sync (phase 1)
@@ -39,6 +39,9 @@ u_crawler ──ICS──▶ caldir/calendars/202615_<course>/{deadlines,windows
                                          │
                                          ▼
                               caldir sync (phase 2 — publishes bridge results)
+                                         │
+                                         ▼
+                              verify-sync.py (convergence check)
 ```
 
 Full mechanics — merge rules, bridge state, conflict conditions, exit codes —
@@ -73,10 +76,11 @@ Tracked:
 - `radicale/config/` — Radicale server config (`config`); `users` is
   gitignored runtime state
 - `caldir/` — Dockerfile and all pipeline scripts (`entrypoint.sh`,
-  `run-sync.sh`, `provision-radicale.sh`, `provision-google.py`,
-  `merge-ucrawler.py`, `bridge-vtodo.py`, `bridge-windows.py`,
-  `dedupe-vtodo.py`); `caldir/config/`, `caldir/state/`, `caldir/calendars/`
-  are gitignored runtime state
+  `cron-run.sh`, `run-sync.sh`, `provision-radicale.sh`, `provision-google.py`,
+  `courses.py`, `merge-ucrawler.py`, `bridge-vtodo.py`, `bridge-windows.py`,
+  `verify-sync.py`, `diagnose-google.py`, and the manual `dedupe-vtodo.py`);
+  `caldir/config/`, `caldir/state/`, `caldir/calendars/` are gitignored runtime
+  state
 - `u-crawler/` — compose-referenced volume mount points only;
   `u-crawler/config/` is gitignored runtime state
 - `docs/`, `docs/adr/` — documentation and architecture decision records
