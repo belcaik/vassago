@@ -19,7 +19,7 @@ Three services, defined in `compose.yaml` (project name `calendar`, network
 | Service | Image | Role | Schedule | Volumes (host -> container) |
 | --- | --- | --- | --- | --- |
 | `radicale` | `ghcr.io/kozea/radicale:stable` | CalDAV hub; the endpoint CalDAV clients (Thunderbird, phones) subscribe to. Port 5232 is bound to the host address configured in `compose.yaml`; inside the container Radicale listens on `0.0.0.0:5232` (`radicale/config/config:2`). | always on (`restart: unless-stopped`) | `./radicale/config` -> `/etc/radicale` (`ro,Z`), `./radicale/data` -> `/var/lib/radicale` (`Z,U`) |
-| `caldir` | `localhost/calendar-caldir:vtodo-support` | Runs the whole sync pipeline: provisioning, merge, `caldir sync`, the two bridges. Built from `caldir/Dockerfile`. | cron `*/15 * * * *`, plus one run at container start (`RUN_ON_START=true`) | `./caldir/config` -> `/data/.config/caldir` (`Z`), `./caldir/state` -> `/data/.local/share/caldir` (`Z`), `./caldir/calendars` -> `/data/calendars` (`z`) |
+| `caldir` | `localhost/calendar-caldir:vtodo-support` | Runs the whole sync pipeline: provisioning, merge, `caldir sync`, the two bridges, and final convergence verification. Built from `caldir/Dockerfile`. | cron `*/15 * * * *`, plus one run at container start (`RUN_ON_START=true`) | `./caldir/config` -> `/data/.config/caldir` (`Z`), `./caldir/state` -> `/data/.local/share/caldir` (`Z`), `./caldir/calendars` -> `/data/calendars` (`z`) |
 | `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1` | External LMS scraper. Writes source ICS files into the shared calendars volume. | cron `0 5 * * *`, plus one run at container start | `./u-crawler/config` -> `/home/appuser/.config/u_crawler` (`Z`), `./caldir/calendars` -> `/home/appuser/Caldir` (`z`) |
 
 `caldir` declares `depends_on: radicale`. `compose.yaml` has no `build:` key for
@@ -39,11 +39,12 @@ is an inference from those flags, not a documented fact.
 ### caldir the binary
 
 `caldir` is an external Rust program, not part of this repository. The
-Dockerfile builds it from `https://github.com/belcaik/caldir.git`, branch
-`vtodo-support`, `--depth 1` (`caldir/Dockerfile:10-14`) — an unpinned branch,
-so image builds are not reproducible. The build produces `caldir` plus provider
-binaries `caldir-provider-google`, `-outlook`, `-icloud`, `-caldav`, `-webcal`
-(`caldir/Dockerfile:24-30`).
+Dockerfile builds it from `https://github.com/belcaik/caldir.git` at the exact
+commit in `ARG CALDIR_COMMIT`, verified after fetch, so image builds are
+reproducible ([ADR-0010](adr/0010-caldir-pinned-to-a-commit.md)). The build
+produces `caldir` plus provider binaries `caldir-provider-google`, `-outlook`,
+`-icloud`, `-caldav`, `-webcal`, fails if the Google provider lacks one of its
+four OAuth scopes, and records `/usr/local/share/caldir/BUILD_INFO`.
 
 The scripts in this repository interact with `caldir` in exactly two ways: they
 run `caldir sync` from `/data/calendars`, and they write `.caldir/config.toml`
@@ -58,15 +59,15 @@ scope here.
                               v
                         [ u-crawler ]                  cron 0 5 * * *
                               |
-                writes 202615_<course>/deadlines/*.ics   (VTODO)
-                       202615_<course>/windows/*.ics     (VEVENT)
+                writes <course>/deadlines/*.ics   (VTODO)
+                       <course>/windows/*.ics     (VEVENT)
                               |
             ./caldir/calendars  (volume shared by both containers)
                               |
                               v
                      [ merge-ucrawler.py ]              cron */15 * * * *
                               |
-       canonical: 202615_<course>__deadlines/  202615_<course>__windows/
+       canonical: <course>__deadlines/  <course>__windows/
                               |
              +----------------+-----------------------+
              |                                        |
@@ -79,8 +80,11 @@ scope here.
                                                     |
                                           caldir sync (phase 2)
                                           provider = "google"
+                                                    |
                                                     v
                                           Google Tasks / Google Calendar
+                                                    |
+                                          verify-sync.py (convergence)
 ```
 
 ### The pipeline
@@ -108,18 +112,34 @@ scope here.
 7. **Phase 2: publish bridge results** — `cd /data/calendars && caldir sync`
    again (`caldir/run-sync.sh:48-50`). The bridges only edited local files; this
    second sync is what pushes those edits out to Radicale and Google.
+8. **Verify convergence** — `verify-sync.py` checks every managed canonical UID
+   within caldir's default ±365-day window. Each must have a Google mirror file
+   carrying `X-GOOGLE-TASK-ID` or `X-GOOGLE-EVENT-ID`; otherwise verification
+   exits 3 (`caldir/run-sync.sh:52-55`).
 
 The two phases exist because the bridges sit between them: phase 1 fetches, the
 bridges decide, phase 2 publishes. A conflict in either bridge stops the run
-before phase 2, so nothing is published that run. See
+before phase 2, so nothing is published that run. Verification runs last, and
+`[caldir] … done` is printed only after it passes. See
 [Exit codes](sync-semantics.md#exit-codes).
 
-`entrypoint.sh` writes `/etc/cron.d/caldir` with `${CRON_SCHEDULE}` invoking
-`/usr/local/bin/run-sync.sh` as root, with output redirected to `/proc/1/fd/1`
-and `/proc/1/fd/2` so it lands in the container log; runs `run-sync.sh || true`
-once when `RUN_ON_START` is `true`; then `exec cron -f`
-(`caldir/entrypoint.sh:6-22`). The `|| true` on the startup run means a failing
-first run does not prevent cron from starting.
+cron starts jobs with an empty environment, so `entrypoint.sh` first snapshots
+an allowlist of container variables (`TZ`, `HOME`, `PATH`, locale, `RADICALE_*`,
+`GOOGLE_*`, `CALENDAR_ROOT`, `CALDIR_*`, `BRIDGE_*`, `WINDOWS_BRIDGE_*`,
+`CRON_SCHEDULE`, `RUN_ON_START`) into `/run/caldir/cron.env` (dir `0700`, file
+`0600`, written atomically with `export -p`). It then writes
+`/etc/cron.d/caldir` with `${CRON_SCHEDULE}` invoking
+`/usr/local/bin/cron-run.sh` as root, with output redirected to `/proc/1/fd/1`
+and `/proc/1/fd/2` so it lands in the container log; runs `cron-run.sh || true`
+once when `RUN_ON_START` is `true`; then `exec cron -f`. The `|| true` on the
+startup run means a failing first run does not prevent cron from starting.
+
+`cron-run.sh` refuses a snapshot that is missing, a symlink, not owned by the
+invoking user (root) or not mode `0600`; otherwise it sources it, takes
+`flock -n /run/caldir/sync.lock` (a run that finds the lock held logs
+`previous sync still running; skipping this run` and exits 0) and execs
+`run-sync.sh`. The startup run and the cron runs take the same path, so they
+never overlap.
 
 ## Directory layout
 
@@ -128,12 +148,18 @@ Everything lives under `/data/calendars` in the `caldir` container
 
 | Path pattern | Kind | Created by | `.caldir/config.toml` |
 | --- | --- | --- | --- |
-| `202615_<course>/deadlines/*.ics` | source (VTODO, one per assignment) | `u-crawler` | none — not a caldir collection |
-| `202615_<course>/windows/*.ics` | source (VEVENT, delivery windows) | `u-crawler` | none — not a caldir collection |
-| `202615_<course>__deadlines/` | canonical | directory by `merge-ucrawler.py` (`caldir/merge-ucrawler.py:146-147`) and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
-| `202615_<course>__windows/` | canonical | directory by `merge-ucrawler.py` (`caldir/merge-ucrawler.py:207-208`) and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
-| `unab/` | mirror (Google Tasks) | `provision-google.py` (`caldir/provision-google.py:582-631`) | google tasklist, see below |
-| `unab-windows/` | mirror (Google Calendar) | `provision-google.py` (`caldir/provision-google.py:634-682`) | google calendar, see below |
+| `<course>/deadlines/*.ics` | source (VTODO, one per assignment) | `u-crawler` | none — not a caldir collection |
+| `<course>/windows/*.ics` | source (VEVENT, delivery windows) | `u-crawler` | none — not a caldir collection |
+| `<course>__deadlines/` | canonical | directory by `merge-ucrawler.py` and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
+| `<course>__windows/` | canonical | directory by `merge-ucrawler.py` and `provision-radicale.sh`; config by `provision-radicale.sh` | caldav, see below |
+| `unab/` | mirror (Google Tasks) | `provision-google.py` | google tasklist, see below |
+| `unab-windows/` | mirror (Google Calendar) | `provision-google.py` | google calendar, see below |
+
+`caldir/courses.py` discovers source courses by this structure, not by an
+academic term prefix. Only a non-empty export causes its canonical directory
+and Radicale collection to be created. Existing canonical collections are still
+scanned when their source is empty or gone, which keeps old terms visible to the
+bridges until an operator deliberately removes them.
 
 The `unab/` and `unab-windows/` slugs are the defaults of
 `GOOGLE_UNAB_TASKLIST_SLUG` and `GOOGLE_UNAB_WINDOWS_SLUG`.
@@ -196,7 +222,7 @@ Inside the `caldir` container:
 
 | Container path | Host counterpart | Contents |
 | --- | --- | --- |
-| `/data` | — | `HOME` and `WORKDIR` (`caldir/Dockerfile:71-72`, also set in `compose.yaml:29`) |
+| `/data` | — | `HOME` and `WORKDIR` (`caldir/Dockerfile:121-122`, also set in `compose.yaml:29`) |
 | `/data/calendars` | `./caldir/calendars` | the calendar tree above; also mounted at `/home/appuser/Caldir` in `u-crawler` |
 | `/data/.config/caldir` | `./caldir/config` | caldir configuration root |
 | `/data/.config/caldir/providers/google/app_config.toml` | under `./caldir/config` | Google OAuth `client_id` / `client_secret` (`caldir/provision-google.py:20-28`) |
@@ -206,6 +232,8 @@ Inside the `caldir` container:
 | `/data/.local/share/caldir/windows-bridge-state.json` | under `./caldir/state` | windows bridge state (`caldir/bridge-windows.py:29-34`) |
 | `/data/.local/share/caldir/quarantine-vtodo/` | under `./caldir/state` | duplicates moved aside by `dedupe-vtodo.py` (`caldir/dedupe-vtodo.py:12`) |
 | `/etc/cron.d/caldir` | none — written at container start | the cron entry generated by `entrypoint.sh` |
+| `/run/caldir/cron.env` | none — written at container start | `0600` snapshot of the allowlisted environment, sourced by `cron-run.sh`; holds `RADICALE_PASSWORD` |
+| `/run/caldir/sync.lock` | none — created by the first run | `flock` lock serialising pipeline runs |
 | `/usr/local/bin/` | none — baked into the image | `caldir` and the provider binaries, plus the shell and Python scripts |
 
 Inside the `radicale` container:
@@ -236,13 +264,13 @@ windows are managed when the UID starts with `u_crawler-window-`
 (`caldir/bridge-windows.py:36`). Items carrying any other UID — a personal
 Google task, for instance — are skipped by both bridges and never modified.
 
-**Term prefixes.** Each of the five scripts declares the same `TERM_PREFIXES`
-list (currently `202615_` and `202625_`) and iterates over it wherever it globs
-course directories: `caldir/provision-radicale.sh`, `caldir/merge-ucrawler.py`,
-`caldir/bridge-vtodo.py`, `caldir/bridge-windows.py`, `caldir/dedupe-vtodo.py`.
-The lists must stay identical; see
-[ADR-0008](adr/0008-overlapping-academic-terms.md). The prefixes are taken to be
-UNAB academic term codes, as written by u_crawler.
+**Course discovery.** `caldir/courses.py` treats a top-level directory with a
+non-empty `deadlines/` or `windows/` export as a source course. No academic
+term code is hardcoded; a directory such as `202625_<course>` is only an example.
+Canonical `<course>__deadlines/` and `<course>__windows/` collections remain
+visible to the bridges even after their source export disappears. This replaced the `TERM_PREFIXES` list of
+[ADR-0008](adr/0008-overlapping-academic-terms.md); see
+[ADR-0009](adr/0009-structural-course-discovery.md).
 
 **Log prefixes.** Every script tags its output, which makes the pipeline
 greppable in the container log:
@@ -255,6 +283,8 @@ greppable in the container log:
 | `[u_crawler-merge]` | `merge-ucrawler.py` |
 | `[bridge]` | `bridge-vtodo.py` |
 | `[windows-bridge]` | `bridge-windows.py` |
+| `[verify]` | `verify-sync.py` |
+| `[diagnose]` | `diagnose-google.py` |
 | `[dedupe]` | `dedupe-vtodo.py` |
 
 **Atomic writes.** Every ICS and state write goes to a temp file beside the
@@ -276,5 +306,5 @@ Spanish. That mix is deliberate.
 **Dependencies.** The Python scripts are stdlib-only (`json`, `os`, `re`,
 `hashlib`, `tomllib`, `urllib`, `pathlib`, `shutil`); the shell scripts are
 POSIX `sh` under `set -eu`. The runtime image installs only `ca-certificates`,
-`cron`, `curl`, `python3`, `tzdata` (`caldir/Dockerfile:35-42`). Nothing in the
+`cron`, `curl`, `python3`, `tzdata` (`caldir/Dockerfile:72-79`). Nothing in the
 runtime needs pip, npm, or cargo.

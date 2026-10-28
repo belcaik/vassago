@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import courses
+
 
 ROOT = Path(
     os.environ.get(
@@ -18,9 +20,6 @@ ROOT = Path(
         "/data/calendars",
     )
 )
-
-# Academic terms processed together; keep identical across the five scripts.
-TERM_PREFIXES = ("202615_", "202625_")
 
 GOOGLE_DIR = Path(
     os.environ.get(
@@ -45,6 +44,15 @@ IGNORE_FOR_HASH = {
 }
 
 GOOGLE_PRIVATE_PREFIX = "X-GOOGLE-"
+
+# Properties Google assigns on its own and u_crawler never exports. caldir
+# writes them back after every push, but its PATCH never sends them, so
+# stripping them in the mirror made phase 2 push an update for every window
+# on every run. They are kept from the mirror (unless the canonical file sets
+# them, in which case it wins) and do not count as a Google-side edit.
+GOOGLE_ASSIGNED = {
+    "ORGANIZER",
+}
 
 
 @dataclass
@@ -106,7 +114,7 @@ def find_vevent(lines: list[str]) -> tuple[int, int]:
 
 
 def parse_vevent(path: Path) -> Item:
-    raw = path.read_text(encoding="utf-8")
+    raw = path.read_bytes().decode("utf-8")
     lines = unfold(raw)
 
     start, end = find_vevent(lines)
@@ -149,7 +157,7 @@ def semantic_hash(item: Item) -> str:
     values: list[str] = []
 
     for name in sorted(item.props):
-        if name in IGNORE_FOR_HASH:
+        if name in IGNORE_FOR_HASH or name in GOOGLE_ASSIGNED:
             continue
 
         if name.startswith(GOOGLE_PRIVATE_PREFIX):
@@ -166,16 +174,7 @@ def semantic_hash(item: Item) -> str:
 def load_canonical() -> dict[str, Item]:
     result: dict[str, Item] = {}
 
-    for directory in sorted(
-        (
-            path
-            for prefix in TERM_PREFIXES
-            for path in ROOT.glob(f"{prefix}*__windows")
-        )
-    ):
-        if not directory.is_dir():
-            continue
-
+    for directory in courses.canonical_dirs(ROOT, "windows"):
         for path in sorted(directory.glob("*.ics")):
             item = parse_vevent(path)
 
@@ -278,14 +277,21 @@ def merge_canonical_into_google(
     g_start, g_end = find_vevent(google_lines)
     c_start, c_end = find_vevent(canonical_lines)
 
+    canonical_names = {
+        property_name(line)
+        for line in canonical_lines[c_start + 1 : c_end]
+    }
+
     google_private: list[str] = []
 
     for line in google_lines[g_start + 1 : g_end]:
         name = property_name(line)
 
-        if (
-            name is not None
-            and name.startswith(GOOGLE_PRIVATE_PREFIX)
+        if name is None:
+            continue
+
+        if name.startswith(GOOGLE_PRIVATE_PREFIX) or (
+            name in GOOGLE_ASSIGNED and name not in canonical_names
         ):
             google_private.append(line)
 
@@ -562,7 +568,7 @@ def reconcile(
 def main() -> int:
     print(
         f"[windows-bridge] canonical: "
-        f"{ROOT}/{{{','.join(TERM_PREFIXES)}}}*__windows"
+        f"{ROOT}/*__windows"
     )
 
     print(

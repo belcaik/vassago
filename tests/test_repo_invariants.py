@@ -1,6 +1,6 @@
 """Structural invariants of the repository itself.
 
-These duplicate checks 4 and 5 of `scripts/check.sh` on purpose, so they also
+These duplicate checks 4, 5 and 6 of `scripts/check.sh` on purpose, so they also
 run under a plain `python3 -m unittest discover -s tests`.
 """
 
@@ -12,45 +12,42 @@ from pathlib import Path
 
 from _load import REPO_ROOT
 
-TERM_PREFIX_FILES = [
-    "caldir/provision-radicale.sh",
-    "caldir/merge-ucrawler.py",
-    "caldir/dedupe-vtodo.py",
-    "caldir/bridge-vtodo.py",
-    "caldir/bridge-windows.py",
-]
-
-TERM_PREFIX_RE = re.compile(r"\b(\d{6}_)")
+# Course discovery is structural (caldir/courses.py). An academic term code
+# in pipeline code is the regression ADR-0009 removed.
+TERM_CODE_RE = re.compile(r"\b\d{6}_")
 
 
 def read(relative):
     return (REPO_ROOT / relative).read_text(encoding="utf-8")
 
 
-class TermPrefixLockstepTest(unittest.TestCase):
-    def prefixes(self):
-        found = {}
-        for relative in TERM_PREFIX_FILES:
-            matches = set(TERM_PREFIX_RE.findall(read(relative)))
-            found[relative] = matches
-        return found
+def pipeline_files():
+    return sorted(
+        path
+        for pattern in ("*.py", "*.sh")
+        for path in (REPO_ROOT / "caldir").glob(pattern)
+    )
 
-    def test_every_script_declares_a_term_prefix(self):
-        for relative, matches in self.prefixes().items():
-            with self.subTest(file=relative):
-                self.assertTrue(
-                    matches,
-                    f"{relative} has no NNNNNN_ term prefix",
+
+class NoHardcodedTermTest(unittest.TestCase):
+    def test_no_pipeline_script_names_a_term_code(self):
+        for path in pipeline_files():
+            with self.subTest(file=path.name):
+                self.assertEqual(
+                    TERM_CODE_RE.findall(path.read_text(encoding="utf-8")),
+                    [],
+                    f"{path.name} hardcodes an academic term code",
                 )
 
-    def test_all_scripts_use_the_same_term_prefix_set(self):
-        sets = {frozenset(m) for m in self.prefixes().values()}
-
-        self.assertEqual(
-            len(sets),
-            1,
-            f"term prefixes are out of lockstep: {sorted(map(sorted, sets))}",
-        )
+    def test_every_pipeline_python_script_uses_shared_discovery(self):
+        for name in (
+            "merge-ucrawler.py",
+            "bridge-vtodo.py",
+            "bridge-windows.py",
+            "dedupe-vtodo.py",
+        ):
+            with self.subTest(file=name):
+                self.assertIn("import courses", read(f"caldir/{name}"))
 
 
 class DockerfileCoverageTest(unittest.TestCase):
@@ -90,6 +87,24 @@ class DockerfileCoverageTest(unittest.TestCase):
     def test_dedupe_stays_out_of_the_image(self):
         self.assertNotIn("dedupe-vtodo.py", self.copied_scripts())
         self.assertNotIn("dedupe-vtodo.py", self.invoked_scripts())
+
+
+class DockerfilePinTest(unittest.TestCase):
+    def test_caldir_commit_is_a_full_sha(self):
+        self.assertRegex(
+            read("caldir/Dockerfile"),
+            re.compile(r"^ARG\s+CALDIR_COMMIT=[0-9a-f]{40}[ \t]*$", re.MULTILINE),
+        )
+
+    def test_no_mutable_branch_ref(self):
+        self.assertNotIn("--branch", read("caldir/Dockerfile"))
+
+    def test_no_continuation_followed_by_whitespace(self):
+        for number, line in enumerate(
+            read("caldir/Dockerfile").splitlines(), start=1
+        ):
+            with self.subTest(line=number):
+                self.assertNotRegex(line, r"\\\s+$")
 
 
 class GitignoreTest(unittest.TestCase):

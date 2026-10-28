@@ -6,7 +6,7 @@ repeat them.
 
 All output shown here appears in the `caldir` container log: `entrypoint.sh`
 points cron's stdout and stderr at `/proc/1/fd/1` and `/proc/1/fd/2`
-(`caldir/entrypoint.sh:10`). Grep by [log prefix](architecture.md#conventions).
+(`caldir/entrypoint.sh:62`). Grep by [log prefix](architecture.md#conventions).
 
 ## Bridge conflicts
 
@@ -22,8 +22,8 @@ run re-observes it from scratch (see
 
 1. edit or delete the **Google-side** mirror file under `unab/` or
    `unab-windows/`;
-2. edit the **canonical** file under `202615_*__deadlines/` or
-   `202615_*__windows/`;
+2. edit the **canonical** file under `<course>__deadlines/` or
+   `<course>__windows/`;
 3. remove the item's entry from the bridge state JSON.
 
 Never resolve a conflict by deleting the canonical `assignment-<id>.ics`. That
@@ -40,13 +40,13 @@ it up.
 ```
 
 **Branch.** VTODO bridge, row 3: no state entry, the UID is present in `unab/`
-but absent from every `202615_*__deadlines/` directory
+but absent from every `<course>__deadlines/` directory
 (`caldir/bridge-vtodo.py:569-580`).
 
 **Cause.** A task carrying a `u_crawler-todo-` UID exists in Google with no
 canonical counterpart. Typically: the state file was lost or its version was
-bumped while a stale task lingered in Google, the course directory was renamed
-or the term prefix moved, or a task was copied between Google lists.
+bumped while a stale task lingered in Google, the canonical course directory was
+renamed or removed, or a task was copied between Google lists.
 
 **Resolution.** If the assignment is genuinely gone, delete the mirror file from
 `unab/`. If the canonical side went missing by accident, restore the course
@@ -144,15 +144,15 @@ re-seeded unconditionally (windows row 7).
 ```
 
 **Branch.** Windows bridge, row 3: no state entry, a `u_crawler-window-` UID
-present in `unab-windows/` and absent from every `202615_*__windows/` directory
+present in `unab-windows/` and absent from every `<course>__windows/` directory
 (`caldir/bridge-windows.py:383-391`).
 
 **Cause.** Same shape as the VTODO "only in Google" conflict: a stale mirrored
-event outliving its canonical source, usually after state loss or a term-prefix
-change.
+event outliving its canonical source, usually after state loss or removal of the
+canonical course collection.
 
 **Resolution.** Delete the event from `unab-windows/` if the delivery window no
-longer exists; restore the canonical `202615_*__windows/` file if it went
+longer exists; restore the canonical `<course>__windows/` file if it went
 missing by accident.
 
 ## Provisioning failures
@@ -205,7 +205,8 @@ Every fatal message is printed to stderr as
 | `missing <path>` | `app_config.toml` or the session file is absent (`:79-86`). Expected at `/data/.config/caldir/providers/google/app_config.toml` and `.../session/<GOOGLE_ACCOUNT>.toml` | Confirm `./caldir/config` is mounted and populated, and that `GOOGLE_ACCOUNT` matches the session filename. `GOOGLE_ACCOUNT` is not set in `compose.yaml`, so the script's built-in default applies unless you set it. |
 | `could not parse <path>: <exc>` | malformed TOML | Repair the file; the session file is rewritten in place by the refresh path, so a crashed refresh is a candidate cause |
 | `Google session is not local OAuth` | `auth_mode` in the session file is not `"local"` (`:247-250`) | Re-run the OAuth flow in local mode. The script only knows how to refresh a local-mode session. |
-| `existing Google OAuth session is missing scopes: <list>` | `granted_scopes` lacks one of `.../auth/tasks`, `.../auth/calendar.events`, `.../auth/calendar.calendarlist.readonly`, `.../auth/calendar.calendars` (`:252-273`) | Re-authorise requesting all four scopes. Editing `granted_scopes` by hand only moves the failure to the first API call. |
+| `existing Google OAuth session is missing scopes: <list>` | `granted_scopes` lacks one of `.../auth/tasks`, `.../auth/calendar.events`, `.../auth/calendar.calendarlist.readonly`, `.../auth/calendar.calendars` | Re-authorise requesting all four scopes. Editing `granted_scopes` by hand only moves the failure to the first API call. |
+| `refreshed Google token is missing scopes: <list>; reconnect with caldir connect` | the refresh response reported a `scope` set without every `REQUIRED_SCOPES` entry | Reconnect with `caldir connect` and grant all four scopes. Provisioning never rewrites scopes to hide this failure. |
 | `OAuth session is incomplete` | `access_token`, `refresh_token`, or `expires_at` missing or empty (`:287-294`) | Re-authorise; a session without a refresh token cannot be renewed |
 | `could not update access_token in existing session` / `could not update expires_at in existing session` | the refresh succeeded but the regex rewrite matched neither line exactly once (`:218-228`). The script edits only those two lines by `^key = "…"` match, leaving `refresh_token`, `auth_mode`, and `granted_scopes` untouched | Restore the two keys to plain one-line `key = "value"` form and re-run |
 | `Google refresh response did not contain access_token` | the token endpoint answered 200 without a token (`:337-341`) — usually a revoked or expired refresh token | Re-authorise |
@@ -221,6 +222,86 @@ in order: the Spanish comment at `:58-59` records that the token in use could no
 create secondary calendars, which is why the script prefers an existing calendar
 by name.
 
+## Verification fails with exit 3
+
+```
+[verify] deadlines: 57 expected, 57 missing from mirror, 0 without X-GOOGLE-TASK-ID
+[verify] deadlines missing: <uid>
+```
+
+**Cause.** A managed canonical UID within ±365 days has no Google mirror file,
+or its mirror file lacks the provider id written after a successful push. On an
+old caldir image this is the restore loop: a bridge restores a Google deletion,
+then phase 2 treats the restoration as another remote deletion and removes it
+again. The corrected caldir fork forgets the sync base after an applied delete,
+so the restoration becomes a Create. See
+[Incident 2026-10](incidents/2026-10-oauth-cron-sync.md).
+
+**Resolution.** First check which caldir commit the image contains:
+
+```sh
+podman exec caldir cat /usr/local/share/caldir/BUILD_INFO
+```
+
+Compare `caldir_commit` with the pin in `caldir/Dockerfile`; rebuild and redeploy
+if it is stale. If the image is current, run
+`podman exec caldir /usr/local/bin/diagnose-google.py` and inspect the listed
+UIDs in the canonical and mirror files. Do not delete the canonical assignment
+to clear the error. Verification runs after phase 2, so exit 3 suppresses
+`[caldir] … done` but does not roll back data already published.
+
+## Mass removal is held back
+
+```
+[u_crawler-merge] WARNING holding N/M removals in <course>__<kind>: over the mass-delete limit ...
+```
+
+**Cause.** One merge would remove more than half of a course's managed files
+(minimum 2). An empty or missing export removes nothing; this guard also holds
+back a partial export that looks like a large Canvas deletion.
+
+**Resolution.** Confirm that the u_crawler export is complete and that the
+removals are intentional. If they are legitimate, set
+`MERGE_ALLOW_MASS_DELETE=1` for one run. Otherwise fix the export first; the
+canonical files were left in place.
+
+## Duplicate u_crawler UID
+
+```
+RuntimeError: duplicate u_crawler UID <uid>: <path A> and <path B>
+```
+
+**Cause.** Two source export files of the same kind carry one UID, either in one
+course or across courses. The merge aborts before writing that kind because the
+bridges key mirrored items by UID.
+
+**Resolution.** The message names both source paths. Remove or correct the
+duplicate in the u_crawler export, then rerun; changing only the canonical copy
+would not fix the next merge.
+
+## Windows are not visible in Google Calendar
+
+**Symptom.** The windows bridge reports pushes, but no delivery windows appear.
+Provisioning may also warn that the calendar `is hidden in the calendar list` or
+`is not selected (not displayed)`.
+
+**Cause.** The calendar can be hidden or unselected in the user's calendar list.
+Events can also be `cancelled` in Google, so updating them does not make them
+visible. The original incident left the production cause open; see
+[Incident 2026-10](incidents/2026-10-oauth-cron-sync.md).
+
+**Resolution.** Run the GET-only diagnosis:
+
+```sh
+podman exec caldir /usr/local/bin/diagnose-google.py
+```
+
+Check `hidden` and `selected`, then the event statuses and the outcome for each
+local `X-GOOGLE-EVENT-ID`. Enable the calendar in Google Calendar if it is hidden
+or unselected. If the ids point to cancelled or unknown events, use those ids to
+investigate the mirror mismatch rather than assuming another push will make the
+events visible.
+
 ## Scheduled runs fail but the start-up run works
 
 ```
@@ -228,16 +309,18 @@ by name.
 /usr/local/bin/provision-radicale.sh: 6: RADICALE_USER: RADICALE_USER required
 ```
 
-**Cause.** The image predates the `/etc/caldir.env` snapshot in
-`caldir/entrypoint.sh`. cron starts jobs with an empty environment, so every
-scheduled run lacked `RADICALE_*` and `TZ`; only the `RUN_ON_START` run, which
-inherits the container environment, could succeed. The `+00:00` offset on the
-cron-run timestamps, against `-03:00` on the start-up run, is the tell.
+**Cause.** The image predates the environment snapshot written by
+`caldir/entrypoint.sh` and restored by `caldir/cron-run.sh`. cron starts jobs
+with an empty environment, so every scheduled run lacked `RADICALE_*` and `TZ`;
+only the `RUN_ON_START` run, which inherits the container environment, could
+succeed. The `+00:00` offset on the cron-run timestamps, against `-03:00` on the
+start-up run, is the tell.
 
 **Resolution.** Rebuild the caldir image and recreate the container (see
 [operations.md](operations.md#build-the-caldir-image)). Verify with
-`ls -l /etc/caldir.env` inside the container (mode `-rw-------`) and by the
-next quarter-hour run reaching `[caldir] … done`.
+`podman exec caldir stat -c '%a %U' /run/caldir/cron.env` (`600 root`) and by
+the next quarter-hour run reaching `[caldir] … done`. Snapshot errors are under
+[Cron environment snapshot failures](#cron-environment-snapshot-failures).
 
 ## Google refresh fails with `invalid_grant`
 
@@ -266,7 +349,7 @@ RuntimeError: duplicate Google UID <uid>: <path A> and <path B>
 **Cause.** Two `.ics` files in the same scanned scope carry the same managed
 UID. Both bridges refuse to continue: `caldir/bridge-vtodo.py:390-394` and
 `:415-420`, `caldir/bridge-windows.py:178-182` and `:202-209`. The canonical
-scan spans **all** `202615_*__deadlines/` (or `__windows/`) directories at once,
+scan spans **all** `<course>__deadlines/` (or `__windows/`) directories at once,
 so the same assignment appearing under two courses trips it too.
 
 Typical origins: a CalDAV client writing a copy under its own filename, a
@@ -284,10 +367,10 @@ For the canonical deadlines side, `caldir/dedupe-vtodo.py` automates exactly
 that: it keeps `assignment-<id>.ics` (recreating it from the u_crawler source
 when needed) and quarantines the rest under
 `/data/.local/share/caldir/quarantine-vtodo/`. It is **not** in the image —
-`caldir/Dockerfile` does not COPY it and `run-sync.sh` never calls it — so it
-must be copied into the running container and executed by hand. It has no
-equivalent for the windows side or for the Google mirror directories; clean
-those up manually. See
+`caldir/Dockerfile` does not COPY it and `run-sync.sh` never calls it — so copy
+both `dedupe-vtodo.py` and its `courses.py` dependency into the running container
+and execute it by hand. It has no equivalent for the windows side or for the
+Google mirror directories; clean those up manually. See
 [dedupe-vtodo.py](sync-semantics.md#dedupe-vtodopy).
 
 ## Pipeline never reaches phase 2
@@ -338,3 +421,29 @@ run.
 through phase 2 and publishes the accumulated changes. A non-2 exit code here
 means a hard failure instead — check
 [Duplicate UIDs](#duplicate-uids) and the traceback in the log.
+
+## Cron environment snapshot failures
+
+```
+[caldir] cron-run: fatal: env snapshot /run/caldir/cron.env is missing (did entrypoint.sh run?)
+[caldir] cron-run: fatal: env snapshot /run/caldir/cron.env has mode <mode>, expected 600
+[caldir] cron-run: fatal: env snapshot /run/caldir/cron.env is owned by uid <uid>, expected uid 0
+```
+
+The wrapper also refuses a symlink and exits 78 for these failures.
+
+**Cause.** `entrypoint.sh` did not create the allowlisted environment snapshot,
+or a manual hotfix changed its path, type, owner, or permissions. Cron starts
+with an empty environment, so bypassing this file would lose required settings.
+See [Incident 2026-10](incidents/2026-10-oauth-cron-sync.md).
+
+**Resolution.** Recreate `caldir` from the current image so `entrypoint.sh`
+writes `/run/caldir/cron.env` atomically as root with mode `0600`. Check only its
+metadata, not its secret contents:
+
+```sh
+podman exec caldir stat -c '%a %U' /run/caldir/cron.env
+```
+
+Expected output is `600 root`. Do not print the snapshot or weaken the owner and
+mode checks to make the run continue.

@@ -1,6 +1,6 @@
 # ADR-0008: Several academic terms can be processed at once
 
-- Status: Accepted
+- Status: Superseded by [ADR-0009](0009-structural-course-discovery.md)
 - Date: 2026-10-25
 
 ## Context

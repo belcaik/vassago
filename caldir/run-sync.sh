@@ -49,4 +49,9 @@ echo "[caldir] $(date -Is) phase 2: publish bridge results"
 cd /data/calendars
 "$CALDIR_BIN" sync
 
+# Phase 2 can report success while undoing the bridges (a restored task
+# deleted again as a "remote deletion"). Only a converged run may say done.
+echo "[caldir] $(date -Is) verify publication"
+/usr/local/bin/verify-sync.py
+
 echo "[caldir] $(date -Is) done"

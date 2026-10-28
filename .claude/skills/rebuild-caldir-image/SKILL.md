@@ -31,11 +31,12 @@ docker build -t localhost/calendar-caldir:vtodo-support caldir/
 podman build -t localhost/calendar-caldir:vtodo-support caldir/
 ```
 
-The Dockerfile clones `https://github.com/belcaik/caldir.git` at
-`--branch vtodo-support --depth 1`, which is a moving branch and not a pinned
-commit. Two builds on different days can produce different binaries. Record the
-build date when the result matters, and see
-[docs/adr/0006-caldir-built-from-vtodo-support-branch.md](../../../docs/adr/0006-caldir-built-from-vtodo-support-branch.md).
+The Dockerfile fetches exactly `ARG CALDIR_COMMIT` from
+`https://github.com/belcaik/caldir.git` and verifies `HEAD` against that full
+SHA. It also checks the four Google OAuth scopes and records `BUILD_INFO`. An
+unchanged commit reuses the compiled layer, so script-only changes do not
+recompile Rust. See
+[ADR-0010](../../../docs/adr/0010-caldir-pinned-to-a-commit.md).
 
 ## 3. Verify the image contents
 
@@ -44,13 +45,15 @@ Check every binary and script it names is present:
 
 ```sh
 docker run --rm --entrypoint sh localhost/calendar-caldir:vtodo-support -c 'ls -l /usr/local/bin'
+docker run --rm --entrypoint cat localhost/calendar-caldir:vtodo-support /usr/local/share/caldir/BUILD_INFO
 ```
 
 Expect the six Rust binaries (`caldir`, `caldir-provider-google`,
 `caldir-provider-outlook`, `caldir-provider-icloud`, `caldir-provider-caldav`,
-`caldir-provider-webcal`) plus `entrypoint.sh`, `provision-radicale.sh`,
-`provision-google.py`, `merge-ucrawler.py`, `bridge-vtodo.py`,
-`bridge-windows.py`, and `run-sync.sh`. `dedupe-vtodo.py` is deliberately
+`caldir-provider-webcal`) plus `entrypoint.sh`, `cron-run.sh`,
+`provision-radicale.sh`, `provision-google.py`, `courses.py`,
+`merge-ucrawler.py`, `bridge-vtodo.py`, `bridge-windows.py`, `verify-sync.py`,
+`diagnose-google.py`, and `run-sync.sh`. `dedupe-vtodo.py` is deliberately
 absent. A missing script means its `COPY` line is gone — fix the Dockerfile and
 rebuild rather than copying the file into a running container.
 
@@ -72,7 +75,8 @@ docker compose logs -f caldir
 ```
 
 Follow the `[caldir]` step lines through provisioning, merge, phase 1, both
-bridges, and phase 2. The run succeeded when you see:
+bridges, and phase 2, then the `[verify]` result. The run succeeded when
+verification passes and you see:
 
 ```
 [caldir] <timestamp> done
@@ -80,3 +84,5 @@ bridges, and phase 2. The run succeeded when you see:
 
 An exit before that line ends the run at the step whose message came last. Exit
 code 2 from a bridge means conflicts — use the `resolve-bridge-conflict` skill.
+Exit 3 from `verify-sync.py` means publication did not converge; see
+[docs/troubleshooting.md](../../../docs/troubleshooting.md#verification-fails-with-exit-3).

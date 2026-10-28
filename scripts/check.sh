@@ -1,7 +1,7 @@
 #!/bin/sh
 # Single validation entry point for the Vassago repository.
 #
-# Runs seven checks in order and stops at the first failure. Nothing here
+# Runs eight checks in order and stops at the first failure. Nothing here
 # builds an image, starts a container or touches runtime state; every check is
 # static except the unit tests, which work in temporary directories.
 #
@@ -10,7 +10,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-TOTAL=7
+TOTAL=8
 
 TMPDIR_CHECK="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_CHECK"' EXIT INT TERM
@@ -80,28 +80,17 @@ if [ -n "$tracked_secrets" ]; then
 fi
 
 
-# 4. Term prefix -------------------------------------------------------------
-step 4 "term prefix lockstep"
+# 4. No hardcoded term ------------------------------------------------------
+step 4 "no academic term code in pipeline scripts"
 
-term_files="caldir/provision-radicale.sh caldir/merge-ucrawler.py \
-caldir/dedupe-vtodo.py caldir/bridge-vtodo.py caldir/bridge-windows.py"
+# Courses are discovered structurally by caldir/courses.py (ADR-0009). A
+# NNNNNN_ literal in a pipeline script means a term got hardcoded again.
+term_hits="$(grep -nE '\b[0-9]{6}_' caldir/*.py caldir/*.sh || true)"
 
-: > "$TMPDIR_CHECK/prefixes"
-
-# Each script may list several terms (a transition between semesters), but
-# every script must list exactly the same set.
-for file in $term_files; do
-    found="$(grep -oE '[0-9]{6}_' "$file" | sort -u | tr '\n' ' ')"
-
-    [ -n "$found" ] || fail "$file declares no NNNNNN_ term prefix"
-
-    echo "$found" >> "$TMPDIR_CHECK/prefixes"
-done
-
-term_sets="$(sort -u < "$TMPDIR_CHECK/prefixes")"
-
-[ "$(printf '%s\n' "$term_sets" | wc -l)" -eq 1 ] \
-    || fail "term prefixes are out of lockstep across the five scripts: $(printf '%s\n' "$term_sets" | tr '\n' '|')"
+if [ -n "$term_hits" ]; then
+    echo "$term_hits" >&2
+    fail "pipeline scripts must not hardcode an academic term code"
+fi
 
 
 # 5. Dockerfile coverage -----------------------------------------------------
@@ -120,20 +109,41 @@ grep -E '^COPY[[:space:]]+[^-]' caldir/Dockerfile \
     | awk '{print $2}' \
     | sort -u > "$TMPDIR_CHECK/copied"
 
+# Helpers imported by the copied scripts must ship with them.
+if grep -lq '^import courses$' caldir/*.py; then
+    grep -qE '^COPY[[:space:]]+courses\.py[[:space:]]' caldir/Dockerfile \
+        || fail "scripts import courses.py, which the Dockerfile never COPYs"
+fi
+
 for script in $(cat "$TMPDIR_CHECK/copied"); do
     [ -f "caldir/$script" ] \
         || fail "the Dockerfile COPYs caldir/$script, which does not exist"
 done
 
 
-# 6. Unit tests --------------------------------------------------------------
-step 6 "unit tests"
+# 6. Reproducible caldir build -----------------------------------------------
+step 6 "caldir Dockerfile pins an exact commit"
+
+grep -qE '^ARG[[:space:]]+CALDIR_COMMIT=[0-9a-f]{40}[[:space:]]*$' caldir/Dockerfile \
+    || fail "caldir/Dockerfile must declare ARG CALDIR_COMMIT=<40-hex SHA>"
+
+if grep -n -e '--branch' caldir/Dockerfile >&2; then
+    fail "caldir/Dockerfile builds from a mutable --branch ref"
+fi
+
+if grep -nE '\\[[:space:]]+$' caldir/Dockerfile >&2; then
+    fail "caldir/Dockerfile has a line continuation followed by trailing whitespace"
+fi
+
+
+# 7. Unit tests --------------------------------------------------------------
+step 7 "unit tests"
 
 python3 -m unittest discover -s tests -v || fail "unit tests failed"
 
 
-# 7. Documentation paths -----------------------------------------------------
-step 7 "documentation paths"
+# 8. Documentation paths -----------------------------------------------------
+step 8 "documentation paths"
 
 python3 scripts/check_docs_paths.py || fail "documentation references a missing path"
 

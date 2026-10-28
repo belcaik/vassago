@@ -1,11 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT="/data/calendars"
-
-# Academic terms processed together; keep identical across the five scripts.
-TERM_PREFIXES="202615_ 202625_"
-
+ROOT="${CALENDAR_ROOT:-/data/calendars}"
 RADICALE_URL="${RADICALE_URL:-http://radicale:5232}"
 RADICALE_USER="${RADICALE_USER:?RADICALE_USER required}"
 RADICALE_PASSWORD="${RADICALE_PASSWORD:?RADICALE_PASSWORD required}"
@@ -80,18 +76,13 @@ CFG
     fi
 }
 
-for prefix in $TERM_PREFIXES; do
-    for course_dir in "$ROOT"/"$prefix"*; do
-        [ -d "$course_dir" ] || continue
+# Courses come from u_crawler's layout, not from a term code: any directory
+# with a non-empty deadlines/ or windows/ export gets its canonical collection.
+# Canonical collections of past terms keep their config and are left alone.
+for kind in deadlines windows; do
+    courses="$(CALENDAR_ROOT="$ROOT" python3 "$(dirname "$0")/courses.py" sources "$kind")"
 
-        course="$(basename "$course_dir")"
-
-        if [ -d "$course_dir/deadlines" ]; then
-            provision_calendar "$course" "deadlines"
-        fi
-
-        if [ -d "$course_dir/windows" ]; then
-            provision_calendar "$course" "windows"
-        fi
+    for course in $courses; do
+        provision_calendar "$course" "$kind"
     done
 done

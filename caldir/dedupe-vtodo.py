@@ -7,12 +7,10 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 
+import courses
+
 
 ROOT = Path("/data/calendars")
-
-# Academic terms processed together; keep identical across the five scripts.
-TERM_PREFIXES = ("202615_", "202625_")
-
 QUARANTINE = Path("/data/.local/share/caldir/quarantine-vtodo")
 
 UID_RE = re.compile(
@@ -37,11 +35,7 @@ def main() -> int:
     groups_seen = 0
     files_quarantined = 0
 
-    for canonical_dir in sorted(
-        path
-        for prefix in TERM_PREFIXES
-        for path in ROOT.glob(f"{prefix}*__deadlines")
-    ):
+    for canonical_dir in courses.canonical_dirs(ROOT, "deadlines"):
         course = canonical_dir.name.removesuffix("__deadlines")
         source_dir = ROOT / course / "deadlines"
 

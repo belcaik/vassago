@@ -18,37 +18,41 @@ optionally `docker`. A non-zero exit means at least one check below failed.
 
 The checks run in this order; find the one that failed and act on it.
 
-1. **Syntax** — `sh -n` on every `*.sh`, `python3 -m py_compile` on every
-   `*.py`. The message names the file and line. Fix the syntax; nothing else in
-   the run is meaningful until it passes.
+1. **Syntax: sh -n and python3 -m py_compile** — every tracked shell and Python
+   file must parse. The message names the file and line. Fix the syntax; nothing
+   else in the run is meaningful until it passes.
 2. **Compose config** — `docker compose --env-file .env.example config -q`.
    Skipped with a notice when `docker` is absent; a skip is not a failure. A
    real failure means `compose.yaml` no longer parses or references an
    undefined variable — check that every `${VAR}` it uses has a line in
    `.env.example`.
-3. **Secret guard** — `git ls-files` must contain none of the gitignored secret
-   or runtime paths. A hit means a credential or live calendar file got staged
-   or committed. Remove it from the index before anything else, and check
-   `.gitignore` still covers it. See [docs/security.md](../../../docs/security.md#what-is-gitignored).
-4. **Term-prefix lockstep** — the set of `NNNNNN_` prefixes in `TERM_PREFIXES` must be identical in
-   `provision-radicale.sh`, `merge-ucrawler.py`, `bridge-vtodo.py`,
-   `bridge-windows.py`, and `dedupe-vtodo.py`. A failure means one script was
-   rotated to a new term and the others were not; the pipeline would silently
-   process an empty set. Rotate all five together — see
-   [docs/operations.md](../../../docs/operations.md#term-rotation).
-5. **Dockerfile COPY coverage** — every `/usr/local/bin/<script>` invoked by
-   `caldir/run-sync.sh` must have a matching `COPY` in `caldir/Dockerfile`. A
-   failure means the next image build produces a container whose pipeline dies
-   at that step. Add the `COPY` (and the `chmod +x` beside it), then rebuild
-   with the `rebuild-caldir-image` skill.
-6. **Unit tests** — `python3 -m unittest discover -s tests`. Failures point at
+3. **Secret guard: no runtime state or credentials tracked** — `git ls-files`
+   must contain none of the gitignored secret or runtime paths. A hit means a
+   credential or live calendar file got staged or committed. Remove it from the
+   index before anything else, and check `.gitignore` still covers it. See
+   [docs/security.md](../../../docs/security.md#what-is-gitignored).
+4. **No academic term code in pipeline scripts** — no `NNNNNN_` literal may
+   appear in `caldir/*.py` or `caldir/*.sh`. Remove the hardcode and use
+   structural discovery through `caldir/courses.py`; new terms require no script
+   change. See [ADR-0009](../../../docs/adr/0009-structural-course-discovery.md).
+5. **run-sync.sh scripts are COPY'd in the Dockerfile** — every
+   `/usr/local/bin/<script>` invoked by `caldir/run-sync.sh` must have a matching
+   `COPY` in `caldir/Dockerfile`, and `courses.py` must be included when scripts
+   import it. A failure means the next image build produces a container whose
+   pipeline dies at that step. Add the `COPY` (and the `chmod +x` beside it),
+   then rebuild with the `rebuild-caldir-image` skill.
+6. **caldir Dockerfile pins an exact commit** — `CALDIR_COMMIT` must be a full
+   40-hex SHA, the build must not use `--branch`, and no continuation backslash
+   may have trailing whitespace. See
+   [ADR-0010](../../../docs/adr/0010-caldir-pinned-to-a-commit.md).
+7. **Unit tests** — `python3 -m unittest discover -s tests`. Failures point at
    the merge or bridge semantics documented in
    [docs/sync-semantics.md](../../../docs/sync-semantics.md). Treat a failure as
    a behaviour change until proven otherwise: the authority rules are the
    contract, not the test.
-7. **Docs path check** — `scripts/check_docs_paths.py` resolves every relative
-   path referenced from Markdown under `docs/`, `AGENTS.md`, `README.md`, and
-   `.claude/skills/`. A failure names the file and the dead path. Either the
+8. **Documentation paths** — `scripts/check_docs_paths.py` resolves every
+   relative path referenced from Markdown under `docs/`, `AGENTS.md`, `README.md`,
+   and `.claude/skills/`. A failure names the file and the dead path. Either the
    target moved or the link has a typo.
 
 ## Tests alone

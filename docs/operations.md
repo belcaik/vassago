@@ -18,18 +18,60 @@ docker build -t localhost/calendar-caldir:vtodo-support caldir/
 podman build -t localhost/calendar-caldir:vtodo-support caldir/
 ```
 
-The build stage clones `https://github.com/belcaik/caldir.git` at
-`--branch vtodo-support` with `--depth 1` (`caldir/Dockerfile:10-14`). That
-branch is not pinned to a commit, so rebuilding at a different time can pull
-different upstream code even with an unchanged `Dockerfile`.
+The build stage fetches exactly `ARG CALDIR_COMMIT` (a full SHA) from
+`ARG CALDIR_REPO` (`https://github.com/belcaik/caldir.git`), fails unless
+`HEAD` equals it, and fails unless `caldir-provider-google` carries all four
+OAuth scopes. To pick up a fork change, bump the `CALDIR_COMMIT` default in
+`caldir/Dockerfile` (or pass `--build-arg CALDIR_COMMIT=<sha>`); an unchanged
+value reuses the cached compile layer. Pass
+`--build-arg VASSAGO_REVISION="$(git rev-parse HEAD)"` to record this repo's
+revision too. The image records what went in at
+`/usr/local/share/caldir/BUILD_INFO` and in the `io.vassago.caldir.commit`
+label. See [ADR-0010](adr/0010-caldir-pinned-to-a-commit.md).
+
+## Disk space on the build host
+
+Check free space and Podman's disk usage before rebuilding:
+
+```sh
+df -h /
+podman system df
+```
+
+Safe cleanup is limited to dangling images and explicitly selected old caldir
+images:
+
+```sh
+podman image prune
+podman images
+podman image rm <old-caldir-image-id>
+```
+
+`podman image prune` without `-a` removes dangling images only. Remove an old
+tagged caldir image only by its explicit id after inspecting `podman images`.
+Never use `podman system prune -a` or any prune with `--volumes`: those can
+remove unrelated images, containers, or volumes on a shared host.
+
+An unchanged pinned `CALDIR_COMMIT` reuses the compiled Rust layer, so changes
+limited to the pipeline scripts do not recompile Rust. If the build host still
+lacks space, build on the development machine and transfer the image instead:
+
+```sh
+podman build -t localhost/calendar-caldir:vtodo-support caldir/
+podman save localhost/calendar-caldir:vtodo-support | ssh baphomet podman load
+```
+
+Use matching CPU architectures on the two machines.
 
 ## First run
 
-On container start, `entrypoint.sh` writes the cron schedule from
-`CRON_SCHEDULE` into `/etc/cron.d/caldir` (running `run-sync.sh` as root,
-output redirected to the container's stdout/stderr via `/proc/1/fd/1` and
-`/proc/1/fd/2`), then checks `RUN_ON_START`. In `compose.yaml` this is set to
-`"true"`, so on every container start `run-sync.sh` runs once immediately
+On container start, `entrypoint.sh` snapshots the pipeline's environment into
+`/run/caldir/cron.env` and writes the cron schedule from `CRON_SCHEDULE` into
+`/etc/cron.d/caldir` (running `cron-run.sh` as root, which restores that
+environment, takes a lock and execs `run-sync.sh`; output redirected to the
+container's stdout/stderr via `/proc/1/fd/1` and `/proc/1/fd/2`), then checks
+`RUN_ON_START`. In `compose.yaml` this is set to `"true"`, so on every
+container start `cron-run.sh` runs once immediately
 (errors from this initial run are swallowed with `|| true` — the container
 still proceeds to `exec cron -f`).
 
@@ -53,8 +95,10 @@ docker compose exec caldir /usr/local/bin/run-sync.sh
 podman compose exec caldir /usr/local/bin/run-sync.sh
 ```
 
-This runs as root inside the container, the same as the cron-triggered
-invocation. Outside of manual runs, cron re-triggers `run-sync.sh`
+This runs as root inside the container with the environment `compose exec`
+provides. It does not take the run lock; to avoid racing a running cron job,
+run `/usr/local/bin/cron-run.sh`, which skips (exit 0)
+while another run holds the lock. Outside of manual runs, cron re-triggers `cron-run.sh`
 automatically every `CRON_SCHEDULE` (`*/15 * * * *` in `compose.yaml` — every
 15 minutes).
 
@@ -74,14 +118,17 @@ Every line is prefixed by the stage that produced it:
 | `[u_crawler-merge]` | `merge-ucrawler.py` |
 | `[bridge]` | `bridge-vtodo.py` |
 | `[windows-bridge]` | `bridge-windows.py` |
+| `[verify]` | `verify-sync.py` (post-publication convergence check) |
+| `[diagnose]` | `diagnose-google.py` (manual read-only diagnosis) |
 
 A healthy run shows this order: `[caldir]` provisioning messages, then
 `[provision]`/`[google-provision]`, then `[u_crawler-merge]`, then `[caldir]
 phase 1: sync providers`, then `[bridge]` and `[windows-bridge]`, then
-`[caldir] phase 2: publish bridge results`, ending in `[caldir] ... done`
-(`caldir/run-sync.sh`). The pipeline runs under `set -eu` and stops at the
-first failing step — a run that stops before `phase 2` did not publish
-whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reaches-phase-2`.
+`[caldir] phase 2: publish bridge results`, then `[verify]`, ending in
+`[caldir] ... done` (`caldir/run-sync.sh`). The pipeline runs under `set -eu`
+and stops at the first failing step — a run that stops before `phase 2` did not
+publish whatever the bridges changed, and a verification failure exits 3 without
+printing `done`. See `docs/troubleshooting.md#pipeline-never-reaches-phase-2`.
 
 ## Google OAuth prerequisites
 
@@ -93,9 +140,9 @@ whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reache
   credentials).
 - `session/<GOOGLE_ACCOUNT>.toml` — keys `access_token`, `refresh_token`,
   `expires_at`, `auth_mode`, `granted_scopes`. `auth_mode` must be `"local"`;
-  any other value is a fatal error (`caldir/provision-google.py:247-250`).
+  any other value is a fatal error.
 
-`granted_scopes` must be a superset of:
+`REQUIRED_SCOPES` declares the scopes that `granted_scopes` must contain:
 
 - `https://www.googleapis.com/auth/tasks`
 - `https://www.googleapis.com/auth/calendar.events`
@@ -103,11 +150,32 @@ whatever the bridges changed. See `docs/troubleshooting.md#pipeline-never-reache
 - `https://www.googleapis.com/auth/calendar.calendars`
 
 `provision-google.py` refreshes the access token itself when it is within 5
-minutes of `expires_at`, rewriting only `access_token` and `expires_at` in
-the session file — it never performs the initial OAuth authorization. That
-first `session/<account>.toml` must be produced by the `caldir`/
-`caldir-provider-google` binary's own OAuth flow, which is outside this
+minutes of `expires_at`. If the refresh response reports `scope`, every required
+scope must be present or provisioning fails; if the response omits `scope`, the
+recorded grants remain authoritative. The script rewrites only `access_token`
+and `expires_at`, never `granted_scopes`, and never performs the initial OAuth
+authorization. That first `session/<account>.toml` must be produced by the
+`caldir`/`caldir-provider-google` binary's own OAuth flow, which is outside this
 repository; consult the `belcaik/caldir` project for how to run it.
+
+Provisioning also warns when the windows calendar is hidden or not selected in
+the user's calendar list. It does not change those visibility settings.
+
+## Diagnose Google mirrors
+
+Run the read-only diagnostic when Google and the local mirrors disagree, or when
+windows do not appear in Google Calendar:
+
+```sh
+podman exec caldir /usr/local/bin/diagnose-google.py
+```
+
+It uses GET requests only to report the windows calendar's `hidden`, `selected`
+and `accessRole` fields, event and task counts by status, and whether each local
+Google provider id is active, cancelled, deleted, or unknown remotely. It never
+creates, updates, or deletes Google data. Its only possible write is the normal
+OAuth access-token refresh shared with provisioning. It prints counts and ids,
+never tokens.
 
 ## Radicale users
 
@@ -129,22 +197,18 @@ and `provision-radicale.sh` creates collections under
 
 ## Term rotation
 
-The live academic terms are the `TERM_PREFIXES` list declared, identically, in
-five scripts: `provision-radicale.sh`, `merge-ucrawler.py`, `dedupe-vtodo.py`,
-`bridge-vtodo.py`, `bridge-windows.py`. `scripts/check.sh` enforces that all
-five list the same set. Rotation takes two separate changes
-([ADR-0008](adr/0008-overlapping-academic-terms.md)):
+A new term needs no code change or image rebuild. `caldir/courses.py` discovers
+any top-level course directory with a non-empty `deadlines/` or `windows/`
+export; a name such as `202625_<course>` is just an example, not a configured
+prefix. On the next run, provisioning and merge create that course's canonical
+directories and Radicale collections automatically.
 
-1. **Add the new term** as soon as u_crawler writes its course directories
-   under `./caldir/calendars`. On the next `run-sync.sh`,
-   `provision-radicale.sh` and `merge-ucrawler.py` create the Radicale
-   collections and canonical directories automatically.
-2. **Drop the old term** only once its items are no longer wanted in Google.
-   Removing a prefix makes every old-term UID look "deleted canonically": the
-   bridges delete untouched mirrors from Google and raise a conflict (blocking
-   phase 2 for everything) for any item you edited or completed there. Before
-   dropping it, delete the old term's files from `unab/` and `unab-windows/`
-   and their entries from both bridge state files.
+Old canonical collections remain visible to the bridges when their source export
+becomes empty or disappears. This prevents an old term from looking like a mass
+deletion. Removing an old term from Google is therefore a deliberate manual
+cleanup step, not part of term rotation; do not delete canonical assignments as
+a routine rotation shortcut.
 
-Both changes need the caldir image rebuilt, because the scripts are copied into
-it (see [Build the caldir image](#build-the-caldir-image)).
+This replaces the two-step `TERM_PREFIXES` rotation of
+[ADR-0008](adr/0008-overlapping-academic-terms.md), superseded by
+[ADR-0009](adr/0009-structural-course-discovery.md).
