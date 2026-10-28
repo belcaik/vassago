@@ -1,7 +1,7 @@
 # caldir is built from one exact commit of the fork. Changing CALDIR_COMMIT
 # busts the fetch/compile layers; leaving it unchanged reuses them.
 ARG CALDIR_REPO=https://github.com/belcaik/caldir.git
-ARG CALDIR_COMMIT=02ee0007d16d2b4caed78100a14d0e348ce8c6ba
+ARG CALDIR_COMMIT=564203d59aabd7a3b6fe08daf96ffa031e95f322
 
 FROM rust:1.97.0-bookworm AS builder
 
