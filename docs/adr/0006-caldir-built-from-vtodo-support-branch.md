@@ -2,7 +2,7 @@
 
 - Status: Accepted (retroactive — documents a decision already implemented);
   the branch reference is superseded by
-  [ADR-0008](0008-caldir-pinned-to-a-commit.md). Line references below
+  [ADR-0010](0010-caldir-pinned-to-a-commit.md). Line references below
   describe the Dockerfile as it was when this ADR was written.
 - Date: 2026-08-26
 

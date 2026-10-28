@@ -1,4 +1,4 @@
-# ADR-0008: caldir is built from a pinned commit
+# ADR-0010: caldir is built from a pinned commit
 
 - Status: Accepted — supersedes the branch-reference part of ADR-0006
 - Date: 2026-10-28

@@ -208,6 +208,27 @@ class SyncDeadlinesTest(unittest.TestCase):
         self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
         self.assertFalse(self.target.exists())
 
+    def test_every_term_is_merged_in_one_run(self):
+        # During a semester transition both terms are processed in one run
+        # (ADR-0008's intent). Discovery is structural (ADR-0009), so a term
+        # nobody listed is merged too instead of being silently skipped.
+        write(self.source / "assignment-1.ics", vtodo())
+
+        new_term = self.root / "202625_other" / "deadlines"
+        write(new_term / "assignment-2.ics", vtodo(uid="u_crawler-todo-2@u-crawler.local"))
+
+        other_term = self.root / "199901_old" / "deadlines"
+        write(other_term / "assignment-3.ics", vtodo(uid="u_crawler-todo-3@u-crawler.local"))
+
+        self.assertEqual(self.mod.sync_deadlines(), (3, 0, 0))
+        self.assertTrue((self.target / "assignment-1.ics").exists())
+        self.assertTrue(
+            (self.root / "202625_other__deadlines" / "assignment-2.ics").exists()
+        )
+        self.assertTrue(
+            (self.root / "199901_old__deadlines" / "assignment-3.ics").exists()
+        )
+
 
 class SyncWindowsTest(unittest.TestCase):
     def setUp(self):

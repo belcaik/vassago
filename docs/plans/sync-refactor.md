@@ -5,7 +5,7 @@
 - Rama Caldir: `fix/sync-bases-and-scope-refresh` (desde `vtodo-support` @ `02ee000`)
 - Registro del incidente: [docs/incidents/2026-10-oauth-cron-sync.md](../incidents/2026-10-oauth-cron-sync.md)
 - Decisiones: [ADR-0009](../adr/0009-structural-course-discovery.md),
-  [ADR-0008](../adr/0008-caldir-pinned-to-a-commit.md)
+  [ADR-0010](../adr/0010-caldir-pinned-to-a-commit.md)
 
 ## 1. Hallazgos y evidencia
 
@@ -14,7 +14,7 @@
 | Elemento | Estado verificado |
 | --- | --- |
 | Vassago `main` | limpio, `2f3f0f4`, igual a `origin/main` |
-| Rama remota `origin/fix/cron-env-and-term-202625` (`7071071`) | **no mergeada**. Contiene el hotfix de cron (`export -p` a `/etc/caldir.env`, línea cron con `. /etc/caldir.env && run-sync.sh`) y una lista `TERM_PREFIXES = ("202615_", "202625_")` en los cinco scripts, más ADR-0008. |
+| Rama remota `origin/fix/cron-env-and-term-202625` (`7071071`) | mergeada en `main` (PR #2) después de abrir este trabajo; reemplazada aquí. Contiene el hotfix de cron (`export -p` a `/etc/caldir.env`, línea cron con `. /etc/caldir.env && run-sync.sh`) y una lista `TERM_PREFIXES = ("202615_", "202625_")` en los cinco scripts, más ADR-0008. |
 | Hotfix `/run/caldir-cron.env` sugerido durante el incidente | **no existe en Git** en ninguna rama; la rama remota usa otra ruta (`/etc/caldir.env`). |
 | Fork Caldir `vtodo-support` | `02ee000` = `origin/vtodo-support`; `constants.rs` ya declara los cuatro scopes. |
 | Checkout local de Caldir | sin cambios rastreados; solo documentación no rastreada (`docs/vtodo/**`), que no se tocó. |
@@ -66,7 +66,7 @@
 5. **Cron** con `cron-run.sh`: snapshot `0600` de una lista blanca de
    variables, `flock` contra ejecuciones solapadas; `RUN_ON_START` usa el
    mismo camino.
-6. **Build reproducible** (ADR-0008): `ARG CALDIR_COMMIT=<sha40>`, fetch de
+6. **Build reproducible** (ADR-0010): `ARG CALDIR_COMMIT=<sha40>`, fetch de
    ese commit exacto, verificación `HEAD == CALDIR_COMMIT`, comprobación de
    los cuatro scopes en el binario, `BUILD_INFO` y etiquetas OCI.
 7. **Diagnóstico** `diagnose-google.py`: solo `GET`.

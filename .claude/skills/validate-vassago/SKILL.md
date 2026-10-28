@@ -44,7 +44,7 @@ The checks run in this order; find the one that failed and act on it.
 6. **caldir Dockerfile pins an exact commit** — `CALDIR_COMMIT` must be a full
    40-hex SHA, the build must not use `--branch`, and no continuation backslash
    may have trailing whitespace. See
-   [ADR-0008](../../../docs/adr/0008-caldir-pinned-to-a-commit.md).
+   [ADR-0010](../../../docs/adr/0010-caldir-pinned-to-a-commit.md).
 7. **Unit tests** — `python3 -m unittest discover -s tests`. Failures point at
    the merge or bridge semantics documented in
    [docs/sync-semantics.md](../../../docs/sync-semantics.md). Treat a failure as

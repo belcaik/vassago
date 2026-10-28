@@ -7,7 +7,7 @@ without manual edits inside containers. Each section is self-contained.
 
 From: any image built from `main` up to `2f3f0f4`, possibly with hand-made
 hotfixes inside the running container.
-To: `refactor/sync-discovery` (ADR-0008, ADR-0009), caldir fork commit
+To: `refactor/sync-discovery` (ADR-0009, ADR-0010), caldir fork commit
 `3b32b5ceceac50038d504cf8c8127af4ef6c58bd`.
 
 Nothing here deletes state, volumes or remote data. Every step before

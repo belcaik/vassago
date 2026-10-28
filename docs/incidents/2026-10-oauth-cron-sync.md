@@ -29,9 +29,9 @@
 
 | Hotfix | Where it existed | Status in Git |
 | --- | --- | --- |
-| `export -p` snapshot + cron line sourcing it (`/etc/caldir.env`) | branch `origin/fix/cron-env-and-term-202625` (`7071071`), never merged | Superseded by `caldir/cron-run.sh` + `entrypoint.sh` (allowlisted variables, `0600`, owner check, `flock`). Not merged as-is. |
+| `export -p` snapshot + cron line sourcing it (`/etc/caldir.env`) | branch `fix/cron-env-and-term-202625` (`7071071`), merged into `main` as PR #2 | Superseded by `caldir/cron-run.sh` + `entrypoint.sh` (allowlisted variables, `0600`, owner check, `flock`). Replaced when `refactor/sync-discovery` merged `main`. |
 | Same idea with `/run/caldir-cron.env` and `umask 077` | suggested for Baphomet only | Not in any branch. Whether it was applied inside the running container is **unknown**; check with the commands below. |
-| `TERM_PREFIXES = ("202615_", "202625_")` in five scripts + ADR-0008 draft | same unmerged branch | Superseded by structural discovery (ADR-0009). |
+| `TERM_PREFIXES = ("202615_", "202625_")` in five scripts + ADR-0008 | branch `fix/cron-env-and-term-202625`, merged into `main` as PR #2 | Superseded by structural discovery (ADR-0009). |
 | Pruning unused images, rebuilding | Baphomet only | Procedure documented in [docs/operations.md](../operations.md#disk-space-on-the-build-host). |
 
 To find out what Baphomet actually runs (read-only):

@@ -41,7 +41,7 @@ is an inference from those flags, not a documented fact.
 `caldir` is an external Rust program, not part of this repository. The
 Dockerfile builds it from `https://github.com/belcaik/caldir.git` at the exact
 commit in `ARG CALDIR_COMMIT`, verified after fetch, so image builds are
-reproducible ([ADR-0008](adr/0008-caldir-pinned-to-a-commit.md)). The build
+reproducible ([ADR-0010](adr/0010-caldir-pinned-to-a-commit.md)). The build
 produces `caldir` plus provider binaries `caldir-provider-google`, `-outlook`,
 `-icloud`, `-caldav`, `-webcal`, fails if the Google provider lacks one of its
 four OAuth scopes, and records `/usr/local/share/caldir/BUILD_INFO`.
@@ -268,7 +268,9 @@ Google task, for instance — are skipped by both bridges and never modified.
 non-empty `deadlines/` or `windows/` export as a source course. No academic
 term code is hardcoded; a directory such as `202625_<course>` is only an example.
 Canonical `<course>__deadlines/` and `<course>__windows/` collections remain
-visible to the bridges even after their source export disappears.
+visible to the bridges even after their source export disappears. This replaced the `TERM_PREFIXES` list of
+[ADR-0008](adr/0008-overlapping-academic-terms.md); see
+[ADR-0009](adr/0009-structural-course-discovery.md).
 
 **Log prefixes.** Every script tags its output, which makes the pipeline
 greppable in the container log:

@@ -36,7 +36,7 @@ The Dockerfile fetches exactly `ARG CALDIR_COMMIT` from
 SHA. It also checks the four Google OAuth scopes and records `BUILD_INFO`. An
 unchanged commit reuses the compiled layer, so script-only changes do not
 recompile Rust. See
-[ADR-0008](../../../docs/adr/0008-caldir-pinned-to-a-commit.md).
+[ADR-0010](../../../docs/adr/0010-caldir-pinned-to-a-commit.md).
 
 ## 3. Verify the image contents
 

@@ -2,9 +2,10 @@
 
 - Status: Accepted — replaces the term-prefix lockstep rule
 - Date: 2026-10-28
-- Supersedes: the unmerged draft ADR-0008 "overlapping academic terms" on
-  `origin/fix/cron-env-and-term-202625` (`7071071`), which kept a hardcoded
-  list of prefixes.
+- Supersedes: [ADR-0008](0008-overlapping-academic-terms.md) "several
+  academic terms can be processed at once" (merged from
+  `fix/cron-env-and-term-202625`, `7071071`), which kept a hardcoded list of
+  prefixes.
 
 ## Context
 
@@ -58,7 +59,7 @@ as "every assignment was deleted in Canvas".
 The bridge authority rules (ADR-0004) are unchanged, including "a task deleted
 in Google is restored while its canonical assignment exists". What changed
 is that the restore now sticks, because caldir forgets a sync base once a
-delete is applied (fork commit `c157a8e`, pinned through ADR-0008).
+delete is applied (fork commit `c157a8e`, pinned through ADR-0010).
 
 ## Consequences
 

@@ -15,7 +15,7 @@ The merge compares content without universal-newline normalisation, treats an
 empty export as no deletion, guards mass removals, and rejects duplicate source
 UIDs. `verify-sync.py` is the final pipeline step and can exit 3 instead of
 letting a non-converged run print `done`. The image builds caldir from a pinned
-commit (ADR-0008); that fork forgets a sync base after an applied delete so a
+commit (ADR-0010); that fork forgets a sync base after an applied delete so a
 bridge restore becomes a Create in phase 2.
 
 The runtime host is a separate machine with its own gitignored state directories

@@ -27,7 +27,7 @@ value reuses the cached compile layer. Pass
 `--build-arg VASSAGO_REVISION="$(git rev-parse HEAD)"` to record this repo's
 revision too. The image records what went in at
 `/usr/local/share/caldir/BUILD_INFO` and in the `io.vassago.caldir.commit`
-label. See [ADR-0008](adr/0008-caldir-pinned-to-a-commit.md).
+label. See [ADR-0010](adr/0010-caldir-pinned-to-a-commit.md).
 
 ## Disk space on the build host
 
@@ -73,7 +73,12 @@ container's stdout/stderr via `/proc/1/fd/1` and `/proc/1/fd/2`), then checks
 `RUN_ON_START`. In `compose.yaml` this is set to `"true"`, so on every
 container start `cron-run.sh` runs once immediately
 (errors from this initial run are swallowed with `|| true` — the container
-still proceeds to `exec cron -f`). Expect the first run to take longer than
+still proceeds to `exec cron -f`).
+
+Because cron starts every job with an empty environment, `entrypoint.sh` also
+writes the container environment to the root-only `/etc/caldir.env`, and the
+cron line sources it before `run-sync.sh`. That is how scheduled runs receive
+`RADICALE_*` and `TZ`. Expect the first run to take longer than
 later ones, since `provision-radicale.sh` and `provision-google.py` create
 collections, a task list, and a calendar that do not yet exist.
 
@@ -203,3 +208,7 @@ becomes empty or disappears. This prevents an old term from looking like a mass
 deletion. Removing an old term from Google is therefore a deliberate manual
 cleanup step, not part of term rotation; do not delete canonical assignments as
 a routine rotation shortcut.
+
+This replaces the two-step `TERM_PREFIXES` rotation of
+[ADR-0008](adr/0008-overlapping-academic-terms.md), superseded by
+[ADR-0009](adr/0009-structural-course-discovery.md).
