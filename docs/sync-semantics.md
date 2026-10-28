@@ -207,11 +207,14 @@ Google. `adopt_google_copies()` runs first: for a canonical assignment with no
 mirror file, an unmanaged mirror task that
 
 - carries an `X-GOOGLE-TASK-ID` no managed mirror file carries, and
-- matches that assignment, and only that one, on `SUMMARY` and `DUE` date,
+- matches that assignment, and no other one, on `SUMMARY` and `DUE` date,
 
 has its `UID` rewritten to the assignment's UID and becomes `right` for the
 table. Logs `[bridge] adopt Google task <- <uid> (already in Google under a
-derived UID)`. Ambiguous matches are left alone and fall through to rows 2/8.
+derived UID)`. When Google already holds duplicates of that assignment, the
+copy with the lowest task id is adopted and the others stay unmanaged and
+untouched. A copy matching two assignments is left alone and they fall
+through to rows 2/8.
 No row changes: a restored assignment whose Google copy now says `COMPLETED`
 goes through row 14, exactly like any Google edit.
 

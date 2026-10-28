@@ -385,18 +385,30 @@ class ReconcileTest(unittest.TestCase):
 
         self.assertEqual(self.mod.reconcile(state), (0, 0, 0))
 
-    def test_ambiguous_google_copies_are_not_adopted(self):
+    def test_one_of_duplicate_google_copies_is_adopted(self):
         self.canonical()
         state = self.seed()
         self.google().unlink()
         first = self.google_copy("gt-1", "first.ics")
         second = self.google_copy("gt-2", "second.ics")
+        before = second.read_bytes()
 
         self.mod.reconcile(state)
 
-        self.assertIn("@google-tasks.com", first.read_text(encoding="utf-8"))
-        self.assertIn("@google-tasks.com", second.read_text(encoding="utf-8"))
-        self.assertEqual(self.managed_google_files(), [self.google()])
+        self.assertEqual(self.managed_google_files(), [first])
+        self.assertEqual(before, second.read_bytes())
+
+    def test_copy_matching_two_assignments_is_not_adopted(self):
+        self.canonical()
+        self.canonical(
+            vtodo(uid="u_crawler-todo-2@u-crawler.local"),
+            name="assignment-2.ics",
+        )
+        copy = self.google_copy()
+
+        self.mod.reconcile({"version": 2, "items": {}})
+
+        self.assertIn("@google-tasks.com", copy.read_text(encoding="utf-8"))
 
     def test_google_copy_with_another_due_date_is_not_adopted(self):
         self.canonical()

@@ -447,8 +447,8 @@ def adopt_google_copies(
     the managed mirror file. Re-seeding that assignment would push a
     second task to Google. Instead, an unmanaged mirror task carrying an
     X-GOOGLE-TASK-ID no managed file claims, matching exactly one missing
-    assignment on SUMMARY and DUE date (and vice versa), is renamed to the
-    assignment's UID. Reconcile then treats it as the Google side.
+    assignment on SUMMARY and DUE date, is renamed to the assignment's UID.
+    Reconcile then treats it as the Google side.
     """
     claimed = {
         property_value(item.props["X-GOOGLE-TASK-ID"][0])
@@ -486,11 +486,17 @@ def adopt_google_copies(
     for key, uids in sorted(missing.items()):
         found = copies.get(key, [])
 
-        if len(uids) != 1 or len(found) != 1:
+        if len(uids) != 1 or not found:
             continue
 
+        # Google may already hold duplicates of one assignment. Adopting one
+        # (lowest task id) keeps a third copy from being pushed; the others
+        # stay unmanaged and untouched.
         uid = uids[0]
-        copy = found[0]
+        copy = min(
+            found,
+            key=lambda item: property_value(item.props["X-GOOGLE-TASK-ID"][0]),
+        )
 
         lines = unfold(copy.raw)
         start, end = find_vtodo(lines)
