@@ -236,7 +236,7 @@ emits only two CONFLICT messages where the VTODO bridge emits five.
 ## dedupe-vtodo.py
 
 A **manual** repair tool. It is not COPY'd into the image
-(`caldir/Dockerfile:47-53`) and `run-sync.sh` never calls it. To use it, run it
+(`caldir/Dockerfile:86-93`) and `run-sync.sh` never calls it. To use it, run it
 by hand inside the container with the file mounted or copied in.
 
 Paths are hardcoded with no environment overrides

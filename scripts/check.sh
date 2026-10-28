@@ -1,7 +1,7 @@
 #!/bin/sh
 # Single validation entry point for the Vassago repository.
 #
-# Runs seven checks in order and stops at the first failure. Nothing here
+# Runs eight checks in order and stops at the first failure. Nothing here
 # builds an image, starts a container or touches runtime state; every check is
 # static except the unit tests, which work in temporary directories.
 #
@@ -10,7 +10,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-TOTAL=7
+TOTAL=8
 
 TMPDIR_CHECK="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_CHECK"' EXIT INT TERM
@@ -121,14 +121,29 @@ for script in $(cat "$TMPDIR_CHECK/copied"); do
 done
 
 
-# 6. Unit tests --------------------------------------------------------------
-step 6 "unit tests"
+# 6. Reproducible caldir build -----------------------------------------------
+step 6 "caldir Dockerfile pins an exact commit"
+
+grep -qE '^ARG[[:space:]]+CALDIR_COMMIT=[0-9a-f]{40}[[:space:]]*$' caldir/Dockerfile \
+    || fail "caldir/Dockerfile must declare ARG CALDIR_COMMIT=<40-hex SHA>"
+
+if grep -n -e '--branch' caldir/Dockerfile >&2; then
+    fail "caldir/Dockerfile builds from a mutable --branch ref"
+fi
+
+if grep -nE '\\[[:space:]]+$' caldir/Dockerfile >&2; then
+    fail "caldir/Dockerfile has a line continuation followed by trailing whitespace"
+fi
+
+
+# 7. Unit tests --------------------------------------------------------------
+step 7 "unit tests"
 
 python3 -m unittest discover -s tests -v || fail "unit tests failed"
 
 
-# 7. Documentation paths -----------------------------------------------------
-step 7 "documentation paths"
+# 8. Documentation paths -----------------------------------------------------
+step 8 "documentation paths"
 
 python3 scripts/check_docs_paths.py || fail "documentation references a missing path"
 

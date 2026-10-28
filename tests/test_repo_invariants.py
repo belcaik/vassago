@@ -1,6 +1,6 @@
 """Structural invariants of the repository itself.
 
-These duplicate checks 4 and 5 of `scripts/check.sh` on purpose, so they also
+These duplicate checks 4, 5 and 6 of `scripts/check.sh` on purpose, so they also
 run under a plain `python3 -m unittest discover -s tests`.
 """
 
@@ -87,6 +87,24 @@ class DockerfileCoverageTest(unittest.TestCase):
     def test_dedupe_stays_out_of_the_image(self):
         self.assertNotIn("dedupe-vtodo.py", self.copied_scripts())
         self.assertNotIn("dedupe-vtodo.py", self.invoked_scripts())
+
+
+class DockerfilePinTest(unittest.TestCase):
+    def test_caldir_commit_is_a_full_sha(self):
+        self.assertRegex(
+            read("caldir/Dockerfile"),
+            re.compile(r"^ARG\s+CALDIR_COMMIT=[0-9a-f]{40}[ \t]*$", re.MULTILINE),
+        )
+
+    def test_no_mutable_branch_ref(self):
+        self.assertNotIn("--branch", read("caldir/Dockerfile"))
+
+    def test_no_continuation_followed_by_whitespace(self):
+        for number, line in enumerate(
+            read("caldir/Dockerfile").splitlines(), start=1
+        ):
+            with self.subTest(line=number):
+                self.assertNotRegex(line, r"\\\s+$")
 
 
 class GitignoreTest(unittest.TestCase):

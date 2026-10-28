@@ -27,18 +27,11 @@ of commit `4124b05`.
 Each of these is real, each is understood, and none was touched. Do not "fix"
 one as a drive-by; each needs its own approved change.
 
-- **The `caldir` fork clone is unpinned.** `caldir/Dockerfile:10-14` clones
-  `--branch vtodo-support --depth 1`, so two builds of the same Dockerfile can
-  produce different binaries and nothing records which commit is in a given
-  image. See [ADR-0006](adr/0006-caldir-built-from-vtodo-support-branch.md).
 - **The term prefix `202615_` is hardcoded in five files.** They must change in
   lockstep or the pipeline silently half-migrates:
   `caldir/provision-radicale.sh:79`, `caldir/merge-ucrawler.py:140,201`,
   `caldir/dedupe-vtodo.py:36`, `caldir/bridge-vtodo.py:379,827`,
   `caldir/bridge-windows.py:167,558`.
-- **`caldir/Dockerfile:68` has a trailing space after the line-continuation
-  backslash.** The Dockerfile parser tolerates it and the image builds; linters
-  flag it. Changing it is a lint-only edit and needs its own approval.
 - **A personal account is the in-code default for `GOOGLE_ACCOUNT`**
   (`caldir/provision-google.py:30-33`). It is not a secret, but it is personal
   data sitting in a tracked file, and it is also not wired through
@@ -50,7 +43,7 @@ one as a drive-by; each needs its own approved change.
 - **`caldir/dedupe-vtodo.py` has hardcoded paths and is not in the image.**
   `ROOT` and `QUARANTINE` are literals with no environment override
   (`caldir/dedupe-vtodo.py:11-12`), and the Dockerfile does not `COPY` it
-  (`caldir/Dockerfile:47-53`). It runs by hand, against paths that only exist
+  (`caldir/Dockerfile:86-93`). It runs by hand, against paths that only exist
   inside a container or on a host laid out the same way.
 - **`merge-ucrawler.py` rewrites every canonical deadline file on every run.**
   `merge_vtodo` emits CRLF, but the "did it change?" comparison is against
@@ -110,10 +103,6 @@ The same rules as [`AGENTS.md`](../AGENTS.md), in short:
 
 ## Recommended next task
 
-Two things, and nothing else:
-
-1. A `rotate-academic-term` skill that changes the term prefix across all five
-   files in lockstep and states what it leaves behind (existing collections and
-   bridge state for the previous term).
-2. A separately approved, lint-only cleanup of the trailing space at
-   `caldir/Dockerfile:68`.
+A `rotate-academic-term` skill that changes the term prefix across all five
+files in lockstep and states what it leaves behind (existing collections and
+bridge state for the previous term).
