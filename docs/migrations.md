@@ -8,16 +8,18 @@ without manual edits inside containers. Each section is self-contained.
 From: any image built from `main` up to `2f3f0f4`, possibly with hand-made
 hotfixes inside the running container.
 To: `refactor/sync-discovery` (ADR-0009, ADR-0010), caldir fork commit
-`3b32b5ceceac50038d504cf8c8127af4ef6c58bd`.
+`3ca66aa3ba1fc1615cba0f54b86f22326fca023a`.
 
 Nothing here deletes state, volumes or remote data. Every step before
 "Switch" is read-only for Google.
 
 ### 0. Preconditions (on the development machine)
 
-1. The caldir fork branch is published, so the pinned SHA can be fetched:
-   `git -C <caldir checkout> push origin fix/sync-bases-and-scope-refresh`
-   and merge it into `vtodo-support` (fast-forward).
+1. The pinned caldir SHA is published: belcaik/caldir#2 (sync bases,
+   scopes, pagination) is merged into `vtodo-support`, and belcaik/caldir#3
+   (`3ca66aa`, Google task identity) is merged or at least pushed. Never
+   build an image with #2 and without #3: it creates a new Google task for
+   every pushed task on every run.
 2. `refactor/sync-discovery` is merged into Vassago `main` and pushed.
 
 ### 1. Record what the host runs today
@@ -75,7 +77,7 @@ podman run --rm --entrypoint cat localhost/calendar-caldir:vtodo-support \
     /usr/local/share/caldir/BUILD_INFO
 ```
 
-`caldir_commit` must be `3b32b5ceceac50038d504cf8c8127af4ef6c58bd`. The build
+`caldir_commit` must be `3ca66aa3ba1fc1615cba0f54b86f22326fca023a`. The build
 already failed if any of the four OAuth scopes were missing.
 
 ### 4. Baseline diagnosis with the new image, before switching (GET only)
