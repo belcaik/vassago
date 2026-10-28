@@ -51,6 +51,8 @@ COPY bridge-vtodo.py /usr/local/bin/bridge-vtodo.py
 COPY bridge-windows.py /usr/local/bin/bridge-windows.py
 COPY run-sync.sh /usr/local/bin/run-sync.sh
 COPY provision-google.py /usr/local/bin/provision-google.py
+COPY courses.py /usr/local/bin/courses.py
+COPY verify-sync.py /usr/local/bin/verify-sync.py
 
 
 RUN chmod +x \
@@ -66,6 +68,7 @@ RUN chmod +x \
     /usr/local/bin/bridge-vtodo.py \
     /usr/local/bin/provision-google.py \
     /usr/local/bin/bridge-windows.py \ 
+    /usr/local/bin/verify-sync.py \
     /usr/local/bin/run-sync.sh
 
 ENV HOME=/data
