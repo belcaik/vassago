@@ -20,7 +20,7 @@ Three services, defined in `compose.yaml` (project name `calendar`, network
 | --- | --- | --- | --- | --- |
 | `radicale` | `ghcr.io/kozea/radicale:stable` | CalDAV hub; the endpoint CalDAV clients (Thunderbird, phones) subscribe to. Port 5232 is bound to the host address configured in `compose.yaml`; inside the container Radicale listens on `0.0.0.0:5232` (`radicale/config/config:2`). | always on (`restart: unless-stopped`) | `./radicale/config` -> `/etc/radicale` (`ro,Z`), `./radicale/data` -> `/var/lib/radicale` (`Z,U`) |
 | `caldir` | `localhost/calendar-caldir:vtodo-support` | Runs the whole sync pipeline: provisioning, merge, `caldir sync`, the two bridges, and final convergence verification. Built from `caldir/Dockerfile`. | cron `*/15 * * * *`, plus one run at container start (`RUN_ON_START=true`) | `./caldir/config` -> `/data/.config/caldir` (`Z`), `./caldir/state` -> `/data/.local/share/caldir` (`Z`), `./caldir/calendars` -> `/data/calendars` (`z`) |
-| `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1` | External LMS scraper. Writes source ICS files into the shared calendars volume. | cron `0 5 * * *`, plus one run at container start | `./u-crawler/config` -> `/home/appuser/.config/u_crawler` (`Z`), `./caldir/calendars` -> `/home/appuser/Caldir` (`z`) |
+| `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.2` | External LMS scraper. Writes source ICS files into the shared calendars volume. | cron `0 5 * * *`, plus one run at container start | `./u-crawler/config` -> `/home/appuser/.config/u_crawler` (`Z`), `./caldir/calendars` -> `/home/appuser/Caldir` (`z`) |
 
 `caldir` declares `depends_on: radicale`. `compose.yaml` has no `build:` key for
 `caldir`, so the image must be built by hand with exactly the tag
