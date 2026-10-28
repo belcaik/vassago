@@ -13,6 +13,7 @@ choices already implemented in the tracked code, and every claim in them cites
 - [ADR-0005: u_crawler stays an external, pinned image](adr/0005-u-crawler-external-image.md) — consumed as `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1`, developed elsewhere, never vendored; its only contract is the directory/UID/filename convention plus the shared volume.
 - [ADR-0006: caldir is built here from the `vtodo-support` branch](adr/0006-caldir-built-from-vtodo-support-branch.md) — built by `caldir/Dockerfile` from an unpinned fork branch, tagged `localhost/calendar-caldir:vtodo-support`, never published, with no `build:` key in Compose.
 - [ADR-0007: Runtime state and secrets live in gitignored bind mounts](adr/0007-runtime-state-and-secrets-outside-git.md) — every credential and runtime path is a gitignored host directory beside `compose.yaml`, provisioning is idempotent, and `.env` carries only the Radicale credentials.
+- [ADR-0008: Several academic terms can be processed at once](adr/0008-overlapping-academic-terms.md) — the five scripts share a `TERM_PREFIXES` list instead of one literal, so a semester change keeps the old term live until its Google mirrors are retired.
 
 ## Small decisions
 
@@ -23,4 +24,5 @@ Visible in the code, consistent across it, and not worth an ADR of their own:
 - **Atomic writes everywhere.** Content goes to a temp sibling and is moved into place with `os.replace`, never written in place (`caldir/merge-ucrawler.py:121-132`, `caldir/bridge-vtodo.py:150-161,453-471`, `caldir/bridge-windows.py:129-142`, `caldir/provision-google.py:230-240`).
 - **`dedupe-vtodo.py` is a manual tool.** It is not `COPY`'d into the image and not called by `run-sync.sh`; it is run by hand inside the container (its paths are hardcoded to `/data/...`) when duplicates appear (`caldir/Dockerfile:47-53`, `caldir/run-sync.sh:13-50`, `caldir/dedupe-vtodo.py:11-12`).
 - **`X-GOOGLE-*` properties are Google-private.** They are excluded from the semantic hashes so Google's own bookkeeping never reads as a user change, and preserved on the Google side when a file is rewritten (`caldir/bridge-vtodo.py:65,164-179,342-347`, `caldir/bridge-windows.py:44,145-160,274-296`).
-- **Cron output is redirected to PID 1**, so scheduled runs land in the container log stream rather than in a file nobody reads (`caldir/entrypoint.sh:10`).
+- **Cron output is redirected to PID 1**, so scheduled runs land in the container log stream rather than in a file nobody reads (`caldir/entrypoint.sh`).
+- **Cron jobs source a snapshot of the container environment.** cron starts jobs with an empty environment, so `entrypoint.sh` writes `export -p` to the root-only `/etc/caldir.env` and the cron line sources it before `run-sync.sh`; without it every scheduled run died with `RADICALE_USER required` and ran in UTC (`caldir/entrypoint.sh`).

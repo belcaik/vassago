@@ -20,6 +20,9 @@ ROOT = Path(
     )
 )
 
+# Academic terms processed together; keep identical across the five scripts.
+TERM_PREFIXES = ("202615_", "202625_")
+
 GOOGLE_DIR = Path(
     os.environ.get(
         "GOOGLE_TASKS_DIR",
@@ -376,7 +379,11 @@ def load_canonical() -> dict[str, Item]:
     result: dict[str, Item] = {}
 
     for directory in sorted(
-        ROOT.glob("202615_*__deadlines")
+        (
+            path
+            for prefix in TERM_PREFIXES
+            for path in ROOT.glob(f"{prefix}*__deadlines")
+        )
     ):
         if not directory.is_dir():
             continue
@@ -824,7 +831,7 @@ def reconcile(
 
 def main() -> int:
     print(
-        f"[bridge] canonical: {ROOT}/202615_*__deadlines"
+        f"[bridge] canonical: {ROOT}/{{{','.join(TERM_PREFIXES)}}}*__deadlines"
     )
     print(
         f"[bridge] Google Tasks: {GOOGLE_DIR}"

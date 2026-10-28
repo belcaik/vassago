@@ -2,6 +2,10 @@
 set -eu
 
 ROOT="/data/calendars"
+
+# Academic terms processed together; keep identical across the five scripts.
+TERM_PREFIXES="202615_ 202625_"
+
 RADICALE_URL="${RADICALE_URL:-http://radicale:5232}"
 RADICALE_USER="${RADICALE_USER:?RADICALE_USER required}"
 RADICALE_PASSWORD="${RADICALE_PASSWORD:?RADICALE_PASSWORD required}"
@@ -76,16 +80,18 @@ CFG
     fi
 }
 
-for course_dir in "$ROOT"/202615_*; do
-    [ -d "$course_dir" ] || continue
+for prefix in $TERM_PREFIXES; do
+    for course_dir in "$ROOT"/"$prefix"*; do
+        [ -d "$course_dir" ] || continue
 
-    course="$(basename "$course_dir")"
+        course="$(basename "$course_dir")"
 
-    if [ -d "$course_dir/deadlines" ]; then
-        provision_calendar "$course" "deadlines"
-    fi
+        if [ -d "$course_dir/deadlines" ]; then
+            provision_calendar "$course" "deadlines"
+        fi
 
-    if [ -d "$course_dir/windows" ]; then
-        provision_calendar "$course" "windows"
-    fi
+        if [ -d "$course_dir/windows" ]; then
+            provision_calendar "$course" "windows"
+        fi
+    done
 done

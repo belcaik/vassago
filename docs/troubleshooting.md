@@ -221,6 +221,41 @@ in order: the Spanish comment at `:58-59` records that the token in use could no
 create secondary calendars, which is why the script prefers an existing calendar
 by name.
 
+## Scheduled runs fail but the start-up run works
+
+```
+[caldir] 2026-10-22T19:00:01+00:00 provisioning Radicale
+/usr/local/bin/provision-radicale.sh: 6: RADICALE_USER: RADICALE_USER required
+```
+
+**Cause.** The image predates the `/etc/caldir.env` snapshot in
+`caldir/entrypoint.sh`. cron starts jobs with an empty environment, so every
+scheduled run lacked `RADICALE_*` and `TZ`; only the `RUN_ON_START` run, which
+inherits the container environment, could succeed. The `+00:00` offset on the
+cron-run timestamps, against `-03:00` on the start-up run, is the tell.
+
+**Resolution.** Rebuild the caldir image and recreate the container (see
+[operations.md](operations.md#build-the-caldir-image)). Verify with
+`ls -l /etc/caldir.env` inside the container (mode `-rw-------`) and by the
+next quarter-hour run reaching `[caldir] … done`.
+
+## Google refresh fails with `invalid_grant`
+
+```
+[google-provision] fatal: POST https://oauth2.googleapis.com/token: HTTP 400: {
+  "error": "invalid_grant",
+```
+
+**Cause.** The refresh token in the session file was revoked or expired. When
+the OAuth app's publishing status is **Testing**, Google expires refresh tokens
+after seven days, so this recurs weekly.
+
+**Resolution.** In the Google Cloud console, set the consent screen's
+publishing status to **In production** (a personal app does not need
+verification; consent shows an "unverified app" warning). Then re-authorise in
+local mode with all four scopes listed under
+[Google provisioning](#google-provisioning).
+
 ## Duplicate UIDs
 
 ```

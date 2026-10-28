@@ -31,7 +31,12 @@ output redirected to the container's stdout/stderr via `/proc/1/fd/1` and
 `/proc/1/fd/2`), then checks `RUN_ON_START`. In `compose.yaml` this is set to
 `"true"`, so on every container start `run-sync.sh` runs once immediately
 (errors from this initial run are swallowed with `|| true` — the container
-still proceeds to `exec cron -f`). Expect the first run to take longer than
+still proceeds to `exec cron -f`).
+
+Because cron starts every job with an empty environment, `entrypoint.sh` also
+writes the container environment to the root-only `/etc/caldir.env`, and the
+cron line sources it before `run-sync.sh`. That is how scheduled runs receive
+`RADICALE_*` and `TZ`. Expect the first run to take longer than
 later ones, since `provision-radicale.sh` and `provision-google.py` create
 collections, a task list, and a calendar that do not yet exist.
 
@@ -124,14 +129,22 @@ and `provision-radicale.sh` creates collections under
 
 ## Term rotation
 
-The literal `202615_` (a course/term prefix) is hardcoded, identically, in
-five scripts: `provision-radicale.sh`, `merge-ucrawler.py`,
-`dedupe-vtodo.py`, `bridge-vtodo.py`, `bridge-windows.py`. When the academic
-term changes, all five must be updated together — `scripts/check.sh` enforces
-that the prefix literal is identical across them (see
-`docs/sync-semantics.md`). Once the prefix is updated and course directories
-matching the new pattern appear under `./caldir/calendars` (written there by
-`u_crawler`), `provision-radicale.sh` and `merge-ucrawler.py` create the
-corresponding Radicale collections and canonical directories automatically on
-the next `run-sync.sh` invocation — no manual collection setup is needed
-beyond updating the prefix.
+The live academic terms are the `TERM_PREFIXES` list declared, identically, in
+five scripts: `provision-radicale.sh`, `merge-ucrawler.py`, `dedupe-vtodo.py`,
+`bridge-vtodo.py`, `bridge-windows.py`. `scripts/check.sh` enforces that all
+five list the same set. Rotation takes two separate changes
+([ADR-0008](adr/0008-overlapping-academic-terms.md)):
+
+1. **Add the new term** as soon as u_crawler writes its course directories
+   under `./caldir/calendars`. On the next `run-sync.sh`,
+   `provision-radicale.sh` and `merge-ucrawler.py` create the Radicale
+   collections and canonical directories automatically.
+2. **Drop the old term** only once its items are no longer wanted in Google.
+   Removing a prefix makes every old-term UID look "deleted canonically": the
+   bridges delete untouched mirrors from Google and raise a conflict (blocking
+   phase 2 for everything) for any item you edited or completed there. Before
+   dropping it, delete the old term's files from `unab/` and `unab-windows/`
+   and their entries from both bridge state files.
+
+Both changes need the caldir image rebuilt, because the scripts are copied into
+it (see [Build the caldir image](#build-the-caldir-image)).

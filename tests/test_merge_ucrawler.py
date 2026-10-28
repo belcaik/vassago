@@ -190,6 +190,25 @@ class SyncDeadlinesTest(unittest.TestCase):
         self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
         self.assertFalse(self.target.exists())
 
+    def test_every_listed_term_is_merged_and_others_ignored(self):
+        # During a semester transition both terms are processed in one run;
+        # course directories from unlisted terms are left untouched.
+        write(self.source / "assignment-1.ics", vtodo())
+
+        new_term = self.root / "202625_other" / "deadlines"
+        write(new_term / "assignment-2.ics", vtodo(uid="u_crawler-todo-2@u-crawler.local"))
+
+        stale_term = self.root / "199901_old" / "deadlines"
+        write(stale_term / "assignment-3.ics", vtodo(uid="u_crawler-todo-3@u-crawler.local"))
+
+        self.assertIn("202625_", self.mod.TERM_PREFIXES)
+        self.assertEqual(self.mod.sync_deadlines(), (2, 0, 0))
+        self.assertTrue((self.target / "assignment-1.ics").exists())
+        self.assertTrue(
+            (self.root / "202625_other__deadlines" / "assignment-2.ics").exists()
+        )
+        self.assertFalse((self.root / "199901_old__deadlines").exists())
+
 
 class SyncWindowsTest(unittest.TestCase):
     def setUp(self):

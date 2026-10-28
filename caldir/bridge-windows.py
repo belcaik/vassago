@@ -19,6 +19,9 @@ ROOT = Path(
     )
 )
 
+# Academic terms processed together; keep identical across the five scripts.
+TERM_PREFIXES = ("202615_", "202625_")
+
 GOOGLE_DIR = Path(
     os.environ.get(
         "GOOGLE_WINDOWS_DIR",
@@ -164,7 +167,11 @@ def load_canonical() -> dict[str, Item]:
     result: dict[str, Item] = {}
 
     for directory in sorted(
-        ROOT.glob("202615_*__windows")
+        (
+            path
+            for prefix in TERM_PREFIXES
+            for path in ROOT.glob(f"{prefix}*__windows")
+        )
     ):
         if not directory.is_dir():
             continue
@@ -555,7 +562,7 @@ def reconcile(
 def main() -> int:
     print(
         f"[windows-bridge] canonical: "
-        f"{ROOT}/202615_*__windows"
+        f"{ROOT}/{{{','.join(TERM_PREFIXES)}}}*__windows"
     )
 
     print(
