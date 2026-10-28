@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import courses
+
 
 ROOT = Path(
     os.environ.get(
@@ -103,7 +105,7 @@ def find_vevent(lines: list[str]) -> tuple[int, int]:
 
 
 def parse_vevent(path: Path) -> Item:
-    raw = path.read_text(encoding="utf-8")
+    raw = path.read_bytes().decode("utf-8")
     lines = unfold(raw)
 
     start, end = find_vevent(lines)
@@ -163,12 +165,7 @@ def semantic_hash(item: Item) -> str:
 def load_canonical() -> dict[str, Item]:
     result: dict[str, Item] = {}
 
-    for directory in sorted(
-        ROOT.glob("202615_*__windows")
-    ):
-        if not directory.is_dir():
-            continue
-
+    for directory in courses.canonical_dirs(ROOT, "windows"):
         for path in sorted(directory.glob("*.ics")):
             item = parse_vevent(path)
 
@@ -555,7 +552,7 @@ def reconcile(
 def main() -> int:
     print(
         f"[windows-bridge] canonical: "
-        f"{ROOT}/202615_*__windows"
+        f"{ROOT}/*__windows"
     )
 
     print(

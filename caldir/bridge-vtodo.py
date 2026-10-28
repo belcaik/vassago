@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import courses
+
 
 ROOT = Path(
     os.environ.get(
@@ -124,7 +126,7 @@ def find_vtodo(lines: list[str]) -> tuple[int, int]:
 
 
 def parse_vtodo(path: Path) -> Item:
-    raw = path.read_text(encoding="utf-8")
+    raw = path.read_bytes().decode("utf-8")
     lines = unfold(raw)
 
     start, end = find_vtodo(lines)
@@ -375,12 +377,7 @@ def copy_rich_fields_to_google(
 def load_canonical() -> dict[str, Item]:
     result: dict[str, Item] = {}
 
-    for directory in sorted(
-        ROOT.glob("202615_*__deadlines")
-    ):
-        if not directory.is_dir():
-            continue
-
+    for directory in courses.canonical_dirs(ROOT, "deadlines"):
         for path in sorted(directory.glob("*.ics")):
             item = parse_vtodo(path)
 
@@ -824,7 +821,7 @@ def reconcile(
 
 def main() -> int:
     print(
-        f"[bridge] canonical: {ROOT}/202615_*__deadlines"
+        f"[bridge] canonical: {ROOT}/*__deadlines"
     )
     print(
         f"[bridge] Google Tasks: {GOOGLE_DIR}"

@@ -80,30 +80,17 @@ if [ -n "$tracked_secrets" ]; then
 fi
 
 
-# 4. Term prefix -------------------------------------------------------------
-step 4 "term prefix lockstep"
+# 4. No hardcoded term ------------------------------------------------------
+step 4 "no academic term code in pipeline scripts"
 
-term_files="caldir/provision-radicale.sh caldir/merge-ucrawler.py \
-caldir/dedupe-vtodo.py caldir/bridge-vtodo.py caldir/bridge-windows.py"
+# Courses are discovered structurally by caldir/courses.py (ADR-0009). A
+# NNNNNN_ literal in a pipeline script means a term got hardcoded again.
+term_hits="$(grep -nE '\b[0-9]{6}_' caldir/*.py caldir/*.sh || true)"
 
-: > "$TMPDIR_CHECK/prefixes"
-
-for file in $term_files; do
-    found="$(grep -oE '[0-9]{6}_' "$file" | sort -u | tr '\n' ' ')"
-
-    [ -n "$found" ] || fail "$file declares no NNNNNN_ term prefix"
-
-    set -- $found
-    [ "$#" -eq 1 ] || fail "$file mixes several term prefixes: $found"
-
-    echo "$1" >> "$TMPDIR_CHECK/prefixes"
-done
-
-term_prefix="$(sort -u < "$TMPDIR_CHECK/prefixes" | tr '\n' ' ')"
-
-set -- $term_prefix
-[ "$#" -eq 1 ] \
-    || fail "term prefixes are out of lockstep across the five scripts: $term_prefix"
+if [ -n "$term_hits" ]; then
+    echo "$term_hits" >&2
+    fail "pipeline scripts must not hardcode an academic term code"
+fi
 
 
 # 5. Dockerfile coverage -----------------------------------------------------
@@ -121,6 +108,12 @@ done
 grep -E '^COPY[[:space:]]+[^-]' caldir/Dockerfile \
     | awk '{print $2}' \
     | sort -u > "$TMPDIR_CHECK/copied"
+
+# Helpers imported by the copied scripts must ship with them.
+if grep -lq '^import courses$' caldir/*.py; then
+    grep -qE '^COPY[[:space:]]+courses\.py[[:space:]]' caldir/Dockerfile \
+        || fail "scripts import courses.py, which the Dockerfile never COPYs"
+fi
 
 for script in $(cat "$TMPDIR_CHECK/copied"); do
     [ -f "caldir/$script" ] \

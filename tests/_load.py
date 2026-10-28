@@ -17,6 +17,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CALDIR_DIR = REPO_ROOT / "caldir"
 
+# The scripts import their shared helpers (`import courses`) from their own
+# directory, which Python puts on sys.path only when a file runs as a script.
+if str(CALDIR_DIR) not in sys.path:
+    sys.path.insert(0, str(CALDIR_DIR))
+
 _counter = itertools.count()
 
 

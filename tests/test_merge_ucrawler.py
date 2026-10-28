@@ -130,23 +130,29 @@ class SyncDeadlinesTest(unittest.TestCase):
         self.assertEqual(self.mod.sync_deadlines(), (1, 0, 0))
         self.assertTrue((self.target / "assignment-1.ics").exists())
 
-    def test_merge_rewrites_every_run_because_of_line_endings(self):
-        # `merge_vtodo` emits CRLF, but the comparison is against
-        # `read_text()`, which has already collapsed CRLF to LF. The two never
-        # compare equal, so an unchanged deadline counts as "updated" on every
-        # run. Content-wise the file is stable.
+    def test_unchanged_deadline_is_not_rewritten(self):
+        # Regression: the comparison used read_text(), which collapses CRLF,
+        # so every deadline was rewritten and counted "updated" on every run.
         write(self.source / "assignment-1.ics", vtodo())
-        self.mod.sync_deadlines()
-
-        self.assertEqual(self.mod.sync_deadlines(), (0, 1, 0))
+        self.assertEqual(self.mod.sync_deadlines(), (1, 0, 0))
         first = (self.target / "assignment-1.ics").read_bytes()
 
-        self.assertEqual(self.mod.sync_deadlines(), (0, 1, 0))
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
         self.assertEqual(
             first,
             (self.target / "assignment-1.ics").read_bytes(),
         )
         self.assertIn(b"\r\n", first)
+
+    def test_lf_target_is_normalised_once(self):
+        # Targets written before the fix may hold LF; one rewrite, then stable.
+        write(self.source / "assignment-1.ics", vtodo())
+        self.target.mkdir(parents=True)
+        (self.target / "assignment-1.ics").write_bytes(vtodo().encode())
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 1, 0))
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
 
     def test_changed_source_updates_target(self):
         write(self.source / "assignment-1.ics", vtodo())
@@ -176,6 +182,10 @@ class SyncDeadlinesTest(unittest.TestCase):
 
     def test_removes_only_assignment_files_missing_from_source(self):
         write(self.source / "assignment-1.ics", vtodo())
+        write(
+            self.source / "assignment-2.ics",
+            vtodo(uid="u_crawler-todo-2@u-crawler.local"),
+        )
         self.mod.sync_deadlines()
         personal = write(self.target / "personal.ics", vtodo(uid="me@local"))
         (self.source / "assignment-1.ics").unlink()
@@ -183,6 +193,14 @@ class SyncDeadlinesTest(unittest.TestCase):
         self.assertEqual(self.mod.sync_deadlines(), (0, 0, 1))
         self.assertFalse((self.target / "assignment-1.ics").exists())
         self.assertTrue(personal.exists())
+
+    def test_emptied_source_is_not_a_deletion(self):
+        write(self.source / "assignment-1.ics", vtodo())
+        self.mod.sync_deadlines()
+        (self.source / "assignment-1.ics").unlink()
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
+        self.assertTrue((self.target / "assignment-1.ics").exists())
 
     def test_course_without_deadlines_dir_is_skipped(self):
         (self.root / "202615_course" / "windows").mkdir(parents=True)
@@ -233,6 +251,10 @@ class SyncWindowsTest(unittest.TestCase):
 
     def test_removes_only_assignment_files_missing_from_source(self):
         write(self.source / "assignment-1.ics", vevent())
+        write(
+            self.source / "assignment-2.ics",
+            vevent(uid="u_crawler-window-2@u-crawler.local"),
+        )
         self.mod.sync_windows()
         personal = write(self.target / "personal.ics", vevent(uid="me@local"))
         (self.source / "assignment-1.ics").unlink()

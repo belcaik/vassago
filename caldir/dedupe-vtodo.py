@@ -7,6 +7,8 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 
+import courses
+
 
 ROOT = Path("/data/calendars")
 QUARANTINE = Path("/data/.local/share/caldir/quarantine-vtodo")
@@ -33,7 +35,7 @@ def main() -> int:
     groups_seen = 0
     files_quarantined = 0
 
-    for canonical_dir in sorted(ROOT.glob("202615_*__deadlines")):
+    for canonical_dir in courses.canonical_dirs(ROOT, "deadlines"):
         course = canonical_dir.name.removesuffix("__deadlines")
         source_dir = ROOT / course / "deadlines"
 
