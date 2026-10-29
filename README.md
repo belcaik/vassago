@@ -14,7 +14,7 @@ prebuilt image.
 | --- | --- | --- | --- |
 | `radicale` | `ghcr.io/kozea/radicale:stable` | CalDAV server; canonical storage for synced collections; published on the host address set in `compose.yaml` | always on |
 | `caldir` | `localhost/calendar-caldir:vtodo-support` (built locally, see Quick start) | Merges u_crawler output, provisions Radicale collections and Google resources, syncs, and reconciles conflicts via two bridges | `RUN_ON_START=true` at container start, then every `CRON_SCHEDULE` (`*/15 * * * *`) |
-| `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1` | Crawls the LMS and writes ICS deadlines/windows into the shared `caldir/calendars` volume | `RUN_ON_START=true` at container start, then every `CRON_SCHEDULE` (`0 5 * * *`) |
+| `u-crawler` | `ghcr.io/belcaik/unab-sync-content:0.1.0-beta.2` | Crawls the LMS and writes ICS deadlines/windows into the shared `caldir/calendars` volume | `RUN_ON_START=true` at container start, then every `CRON_SCHEDULE` (`0 5 * * *`) |
 
 ## Data flow
 

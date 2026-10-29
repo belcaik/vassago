@@ -44,7 +44,7 @@ services:
       - calendar
 
   u-crawler:
-    image: ghcr.io/belcaik/unab-sync-content:0.1.0-beta.1
+    image: ghcr.io/belcaik/unab-sync-content:0.1.0-beta.2
     container_name: u-crawler-calendar
     restart: unless-stopped
 

@@ -2,6 +2,8 @@
 
 - Status: Accepted (retroactive — documents a decision already implemented)
 - Date: 2026-08-26
+- Amended 2026-10-28: the pinned tag moved to `0.1.0-beta.2` (`compose.yaml`);
+  the decision is unchanged, the tag below is the original one.
 
 ## Context
 
