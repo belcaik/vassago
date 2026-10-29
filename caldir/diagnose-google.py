@@ -63,7 +63,16 @@ def local_ids(mirror: Path, prop: str) -> dict[str, str]:
         text = path.read_bytes().decode("utf-8").replace("\r\n", "\n")
         uid = remote_id = None
 
+        # Unfold first: Google event ids are long enough for caldir to fold
+        # the X-GOOGLE-EVENT-ID line, and a truncated id matches nothing.
+        lines: list[str] = []
         for line in text.split("\n"):
+            if line.startswith((" ", "\t")) and lines:
+                lines[-1] += line[1:]
+            else:
+                lines.append(line)
+
+        for line in lines:
             if line.startswith("UID:"):
                 uid = line[4:].strip()
             elif line.split(":", 1)[0].split(";", 1)[0] == prop:
