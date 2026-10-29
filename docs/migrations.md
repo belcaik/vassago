@@ -111,16 +111,22 @@ podman-compose run --rm --entrypoint caldir caldir status --calendar unab
 
 ### 5. Switch
 
+`podman-compose` 1.0.x `up -d` restarts an existing `caldir` container on the
+image it was created from, even after the tag moved. Stop and remove it first,
+and check the image id before the first run gets far
+(`RUN_ON_START=true` starts it at once):
+
 ```sh
+podman-compose stop caldir && podman rm caldir
 podman-compose up -d caldir
+podman ps --filter name=^caldir$ --format '{{.ImageID}}'   # the new image
 podman logs -f caldir
 ```
 
 Expected on the first run:
 
-- `[u_crawler-merge]` reports every deadline and window as `updated` once:
-  files written as LF by the old merge are normalised to CRLF. The next run
-  reports 0.
+- `[u_crawler-merge]` reports only new assignments as created; canonical files
+  are matched by UID, so the names caldir gives them do not matter.
 - `202625_*` (and any newer) courses get Radicale collections and canonical
   directories; their assignments are seeded into Google.
 - Tasks the old loop kept restoring are adopted, not recreated:
@@ -141,10 +147,30 @@ Wait for one scheduled run (15 min) and check its log lines carry local time
 and end in `done`. A run that ends with `verify-sync` exit 3 lists the UIDs
 that did not converge; see [troubleshooting.md](troubleshooting.md).
 
+### 7. Repair duplicate canonical files (2026-10-29, once)
+
+The first deploy ran `5a0d148`, whose merge matched canonical files by name.
+caldir renamed every file it wrote back, the next merge re-created
+`assignment-<id>.ics` beside it, and the bridge stopped on
+`duplicate canonical UID`. With `caldir` stopped and the fixed image tagged,
+keep the copy each UID's last bridge state proves, quarantine the rest (dry
+run first; exit 1 lists any UID it could not prove and leaves it alone):
+
+```sh
+podman unshare python3 scripts/quarantine-duplicate-canonical.py \
+    caldir/calendars caldir/state caldir/state/quarantine-merge-20261029
+podman unshare python3 scripts/quarantine-duplicate-canonical.py \
+    caldir/calendars caldir/state caldir/state/quarantine-merge-20261029 --apply
+```
+
+Then switch as in step 5. The first run pushes the restored completions to
+Radicale and nothing to Google Tasks.
+
 ### Rollback
 
 ```sh
 podman tag localhost/calendar-caldir:pre-2026-10 localhost/calendar-caldir:vtodo-support
+podman-compose stop caldir && podman rm caldir
 podman-compose up -d caldir
 ```
 

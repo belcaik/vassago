@@ -360,8 +360,12 @@ This is a hard failure, not a conflict: the traceback exits 1, the run stops,
 and no state is saved (`save_state` is never reached). See
 [Exit codes](sync-semantics.md#exit-codes).
 
-**Resolution.** The message names both paths. Keep `assignment-<id>.ics` and
-move the other file out of the calendar tree.
+**Resolution.** The message names both paths. caldir renames canonical files it
+writes, so `assignment-<id>.ics` is not necessarily the right copy: keep the one
+whose content the last bridge run recorded (user state included) and move the
+other out of the calendar tree. `scripts/quarantine-duplicate-canonical.py`
+does that by the bridge state's hash and refuses any UID it cannot prove; see
+[migrations.md](migrations.md).
 
 For the canonical deadlines side, `caldir/dedupe-vtodo.py` automates exactly
 that: it keeps `assignment-<id>.ics` (recreating it from the u_crawler source

@@ -25,6 +25,17 @@ USER_STATE_FIELDS = {
     "PERCENT-COMPLETE",
 }
 
+# caldir re-serializes and renames a canonical file whenever it writes one
+# (a pull, or the write-back after a push): the name becomes its own slug and
+# DTSTAMP moves. Canonical files are therefore matched to their source by UID,
+# and compared without DTSTAMP, so neither change reads as an edit.
+VOLATILE_FIELDS = {"DTSTAMP"}
+
+MANAGED_UID_PREFIXES = {
+    "deadlines": "u_crawler-todo-",
+    "windows": "u_crawler-window-",
+}
+
 
 def unfold(raw: str) -> list[str]:
     raw = raw.replace("\r\n", "\n").replace("\r", "\n")
@@ -151,6 +162,70 @@ def component_uid(raw: str) -> str | None:
     return None
 
 
+def same_content(raw: str, other: str, component: str) -> bool:
+    """Whether two files carry the same component, ignoring serialization.
+
+    Property order, line endings, folding, DTSTAMP and trailing blanks (caldir
+    trims SUMMARY) are not content.
+    """
+
+    def signature(text: str) -> list[str]:
+        lines = unfold(text)
+        start, end = find_component(lines, component)
+
+        return sorted(
+            line.rstrip()
+            for line in lines[start + 1 : end]
+            if property_name(line) not in VOLATILE_FIELDS | {None}
+        )
+
+    return signature(raw) == signature(other)
+
+
+def files_by_uid(directory: Path) -> dict[str, Path]:
+    """Canonical files by UID, whatever caldir named them.
+
+    Two files with one UID abort the run before anything is written: the
+    bridges would refuse them anyway, and merging into either would be a guess.
+    """
+    found: dict[str, Path] = {}
+
+    for path in sorted(directory.glob("*.ics")):
+        uid = component_uid(path.read_bytes().decode("utf-8"))
+
+        if uid is None:
+            continue
+
+        if uid in found:
+            raise RuntimeError(
+                f"duplicate canonical UID {uid}: {found[uid]} and {path}"
+            )
+
+        found[uid] = path
+
+    return found
+
+
+def sources_by_uid(source_dir: Path) -> dict[str, Path]:
+    return {
+        component_uid(path.read_bytes().decode("utf-8")): path
+        for path in sorted(source_dir.glob("*.ics"))
+    }
+
+
+def new_target(target_dir: Path, source_path: Path) -> Path:
+    target_path = target_dir / source_path.name
+
+    # Another item already holds the source's name: never write over it.
+    if target_path.exists():
+        raise RuntimeError(
+            f"{target_path} exists under another UID; "
+            f"refusing to create {source_path.name} over it"
+        )
+
+    return target_path
+
+
 def check_unique_uids(kind: str) -> None:
     """Fail before writing anything if two source files share a UID.
 
@@ -218,25 +293,18 @@ def sync_deadlines() -> tuple[int, int, int]:
         target_dir = ROOT / courses.canonical_name(course, "deadlines")
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        source_files = {
-            path.name: path
-            for path in source_dir.glob("*.ics")
-        }
+        source_files = sources_by_uid(source_dir)
+        target_files = files_by_uid(target_dir)
 
-        target_files = {
-            path.name: path
-            for path in target_dir.glob("*.ics")
-        }
-
-        for filename, source_path in sorted(source_files.items()):
-            target_path = target_dir / filename
+        for uid, source_path in sorted(source_files.items()):
             source_raw = source_path.read_bytes().decode("utf-8")
 
-            if not target_path.exists():
-                atomic_write(target_path, source_raw)
+            if uid not in target_files:
+                atomic_write(new_target(target_dir, source_path), source_raw)
                 created += 1
                 continue
 
+            target_path = target_files[uid]
             existing_raw = target_path.read_bytes().decode("utf-8")
 
             try:
@@ -249,24 +317,26 @@ def sync_deadlines() -> tuple[int, int, int]:
                     f"failed merging {source_path} -> {target_path}: {exc}"
                 ) from exc
 
-            if merged_raw != existing_raw:
+            if not same_content(merged_raw, existing_raw, "VTODO"):
                 atomic_write(target_path, merged_raw)
                 updated += 1
 
         # Sólo eliminamos archivos pertenecientes al esquema de u_crawler.
         # No tocamos cualquier otro ICS que pudiera existir en el calendario.
         managed = [
-            filename
-            for filename in sorted(target_files)
-            if filename.startswith("assignment-")
+            uid
+            for uid in sorted(target_files)
+            if uid.startswith(MANAGED_UID_PREFIXES["deadlines"])
         ]
-        doomed = [
-            filename for filename in managed if filename not in source_files
-        ]
+        doomed = [uid for uid in managed if uid not in source_files]
 
-        if removal_allowed(target_dir, doomed, len(managed)):
-            for filename in doomed:
-                target_files[filename].unlink()
+        if removal_allowed(
+            target_dir,
+            [target_files[uid].name for uid in doomed],
+            len(managed),
+        ):
+            for uid in doomed:
+                target_files[uid].unlink()
                 removed += 1
 
     return created, updated, removed
@@ -284,36 +354,41 @@ def sync_windows() -> tuple[int, int]:
         target_dir = ROOT / courses.canonical_name(course, "windows")
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        source_files = {
-            path.name: path
-            for path in source_dir.glob("*.ics")
-        }
+        source_files = sources_by_uid(source_dir)
+        target_files = files_by_uid(target_dir)
 
-        for filename, source_path in sorted(source_files.items()):
-            target_path = target_dir / filename
+        for uid, source_path in sorted(source_files.items()):
             source_raw = source_path.read_bytes().decode("utf-8")
 
-            if (
-                not target_path.exists()
-                or target_path.read_bytes().decode("utf-8") != source_raw
+            if uid not in target_files:
+                atomic_write(new_target(target_dir, source_path), source_raw)
+                updated += 1
+                continue
+
+            target_path = target_files[uid]
+
+            if not same_content(
+                source_raw,
+                target_path.read_bytes().decode("utf-8"),
+                "VEVENT",
             ):
                 atomic_write(target_path, source_raw)
                 updated += 1
 
         managed = [
-            path
-            for path in sorted(target_dir.glob("*.ics"))
-            if path.name.startswith("assignment-")
+            uid
+            for uid in sorted(target_files)
+            if uid.startswith(MANAGED_UID_PREFIXES["windows"])
         ]
-        doomed = [path for path in managed if path.name not in source_files]
+        doomed = [uid for uid in managed if uid not in source_files]
 
         if removal_allowed(
             target_dir,
-            [path.name for path in doomed],
+            [target_files[uid].name for uid in doomed],
             len(managed),
         ):
-            for path in doomed:
-                path.unlink()
+            for uid in doomed:
+                target_files[uid].unlink()
                 removed += 1
 
     return updated, removed

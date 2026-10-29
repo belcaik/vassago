@@ -25,14 +25,28 @@ hardcoded. Canonical collections are discovered by suffix independently of the
 source export, so old terms remain visible to the bridges. Canonical directories
 and Radicale collections are created only for non-empty exports.
 
+### Matching by UID
+
+caldir renames a canonical file to its own slug (`_task__<due>__<summary>.ics`
+for a task) and re-serializes it whenever it writes one: a pull, or the
+write-back after a push. A source file is therefore matched to the canonical
+file carrying the **same UID**, whatever its name. Two canonical files with one
+UID abort the run (`duplicate canonical UID`) before anything is written. A new
+item is written under the source's name; a different item already holding that
+name aborts the run instead of being overwritten.
+
+"Differs" below means differs in content: both sides are compared property by
+property, ignoring order, line endings, folding, `DTSTAMP` and trailing blanks
+(caldir trims `SUMMARY`). A file caldir re-serialized is not rewritten.
+
 ### Deadlines (VTODO)
 
-Per source file:
+Per source UID:
 
 | Case | Action |
 | --- | --- |
-| target file absent | copy source verbatim, count as created |
-| target file present | `merge_vtodo(source, existing)`; write only if the result differs from the existing content |
+| no canonical file has the UID | copy source verbatim, count as created |
+| a canonical file has the UID | `merge_vtodo(source, existing)`; write it to that file only if the result differs from the existing content |
 
 `merge_vtodo` rebuilds the VTODO body from the **source**, dropping every source
 line whose property name is in `USER_STATE_FIELDS`, and appends the **existing**
@@ -54,23 +68,21 @@ A `merge_vtodo` failure (for example, no VTODO component in either file) is
 re-raised as `RuntimeError: failed merging <source> -> <target>: ...`, which
 aborts the run.
 
-Existing content is read with `read_bytes()` before UTF-8 decoding, so universal
-newline conversion cannot make an unchanged CRLF file look different. An
-unchanged merge is not rewritten and is not counted as `updated`.
+An unchanged merge is not rewritten and is not counted as `updated`.
 
 ### Windows (VEVENT)
 
-No field-level merge: if the target is absent or its content differs from the
-source, the source overwrites it. Delivery windows carry no user state worth
-preserving. This comparison also starts from `read_bytes()` and preserves line
-endings.
+No field-level merge: if no canonical file has the UID, or that file's content
+differs from the source, the source is written to it. Delivery windows carry no
+user state worth preserving.
 
 ### Deletion rule
 
 Both halves consider a canonical file for deletion only when **both** hold:
 
-1. its name starts with `assignment-`, and
-2. no file of that name exists in the non-empty source export.
+1. its UID is managed (`u_crawler-todo-` for deadlines, `u_crawler-window-`
+   for windows), and
+2. no file with that UID exists in the non-empty source export.
 
 An empty or missing export is not a deletion and removes nothing. In addition,
 a run that would remove more than half of a course's managed files (minimum 2)
