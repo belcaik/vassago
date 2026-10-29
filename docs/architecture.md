@@ -250,11 +250,13 @@ collections.
 
 ## Conventions
 
-**File naming.** Source and canonical ICS files are named `assignment-<id>.ics`.
-The prefix is load-bearing: `merge-ucrawler.py` deletes only files starting with
-`assignment-` (`caldir/merge-ucrawler.py:186-192`,
-`caldir/merge-ucrawler.py:226-232`), and `dedupe-vtodo.py` reconstructs the name
-from the UID (`caldir/dedupe-vtodo.py:63`). Any other `.ics` dropped into a
+**File naming.** Source files are named `assignment-<id>.ics`, and a new
+canonical file starts under that name. caldir renames a canonical file to its
+own slug the first time it writes it, so no script may find a canonical file by
+name: `merge-ucrawler.py` matches and deletes by managed UID
+(`caldir/merge-ucrawler.py`, `files_by_uid`). `dedupe-vtodo.py` still
+reconstructs `assignment-<id>.ics` from the UID (`caldir/dedupe-vtodo.py:63`)
+and predates the renaming. Any `.ics` with an unmanaged UID dropped into a
 canonical directory is left alone.
 
 **Managed UIDs.** VTODO items are managed when the UID starts with

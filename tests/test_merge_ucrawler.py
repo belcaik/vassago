@@ -41,6 +41,19 @@ def vevent(uid="u_crawler-window-1@u-crawler.local", summary="Window 1"):
     )
 
 
+def caldir_copy(raw, dtstamp="20261029T012500Z"):
+    """The same item as caldir writes it back: CRLF, new DTSTAMP, own order."""
+    lines = raw.rstrip("\n").split("\n")
+    lines = [
+        f"DTSTAMP:{dtstamp}" if line.startswith("DTSTAMP:") else line
+        for line in lines
+    ]
+    begin = next(i for i, line in enumerate(lines) if line.startswith("BEGIN:V") and line != "BEGIN:VCALENDAR")
+    end = next(i for i, line in enumerate(lines) if line.startswith("END:V") and line != "END:VCALENDAR")
+    body = list(reversed(lines[begin + 1 : end]))
+    return "\r\n".join(lines[: begin + 1] + body + lines[end:]) + "\r\n"
+
+
 class PureHelpersTest(unittest.TestCase):
     """Helpers that do not touch the filesystem; ROOT is irrelevant here."""
 
@@ -145,13 +158,12 @@ class SyncDeadlinesTest(unittest.TestCase):
         )
         self.assertIn(b"\r\n", first)
 
-    def test_lf_target_is_normalised_once(self):
-        # Targets written before the fix may hold LF; one rewrite, then stable.
+    def test_lf_target_with_the_same_content_is_left_alone(self):
+        # Line endings are serialization, not content: no rewrite, no push.
         write(self.source / "assignment-1.ics", vtodo())
         self.target.mkdir(parents=True)
         (self.target / "assignment-1.ics").write_bytes(vtodo().encode())
 
-        self.assertEqual(self.mod.sync_deadlines(), (0, 1, 0))
         self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
 
     def test_changed_source_updates_target(self):
@@ -193,6 +205,77 @@ class SyncDeadlinesTest(unittest.TestCase):
         self.assertEqual(self.mod.sync_deadlines(), (0, 0, 1))
         self.assertFalse((self.target / "assignment-1.ics").exists())
         self.assertTrue(personal.exists())
+
+    def test_file_renamed_by_caldir_is_matched_by_uid(self):
+        # Production 2026-10-29: caldir wrote the canonical file back under
+        # its own slug; matching by filename re-created assignment-1.ics next
+        # to it, and the bridge stopped on the duplicate UID.
+        write(self.source / "assignment-1.ics", vtodo())
+        renamed = write(
+            self.target / "_task__2026-08-30T2359__assignment-1.ics",
+            caldir_copy(vtodo(extra="STATUS:COMPLETED")),
+        )
+        before = renamed.read_bytes()
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
+        self.assertEqual(sorted(p.name for p in self.target.glob("*.ics")), [renamed.name])
+        self.assertEqual(renamed.read_bytes(), before)
+
+    def test_source_change_updates_the_renamed_file_in_place(self):
+        write(self.source / "assignment-1.ics", vtodo(summary="Renamed"))
+        renamed = write(
+            self.target / "_task__2026-08-30T2359__assignment-1.ics",
+            caldir_copy(vtodo(extra="STATUS:COMPLETED")),
+        )
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 1, 0))
+        self.assertEqual(sorted(p.name for p in self.target.glob("*.ics")), [renamed.name])
+        merged = renamed.read_text(encoding="utf-8")
+        self.assertIn("SUMMARY:Renamed", merged)
+        self.assertIn("STATUS:COMPLETED", merged)
+
+    def test_trailing_blanks_caldir_trims_are_not_an_edit(self):
+        write(self.source / "assignment-1.ics", vtodo(summary="Caso   "))
+        write(self.target / "_task__x.ics", caldir_copy(vtodo(summary="Caso")))
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 0))
+
+    def test_duplicate_canonical_uid_aborts_before_writing(self):
+        write(self.source / "assignment-1.ics", vtodo(summary="Renamed"))
+        first = write(self.target / "assignment-1.ics", vtodo())
+        second = write(self.target / "_task__x.ics", caldir_copy(vtodo()))
+
+        with self.assertRaisesRegex(RuntimeError, "duplicate canonical UID"):
+            self.mod.sync_deadlines()
+
+        self.assertNotIn("Renamed", first.read_text(encoding="utf-8"))
+        self.assertNotIn("Renamed", second.read_text(encoding="utf-8"))
+
+    def test_a_file_of_another_uid_under_the_source_name_is_not_overwritten(self):
+        write(self.source / "assignment-1.ics", vtodo())
+        other = write(self.target / "assignment-1.ics", vtodo(uid="me@local"))
+
+        with self.assertRaisesRegex(RuntimeError, "under another UID"):
+            self.mod.sync_deadlines()
+
+        self.assertIn("UID:me@local", other.read_text(encoding="utf-8"))
+
+    def test_renamed_file_of_an_assignment_gone_from_source_is_removed(self):
+        write(self.source / "assignment-1.ics", vtodo())
+        write(
+            self.source / "assignment-2.ics",
+            vtodo(uid="u_crawler-todo-2@u-crawler.local"),
+        )
+        self.mod.sync_deadlines()
+        renamed = write(
+            self.target / "_task__assignment-2.ics",
+            caldir_copy(vtodo(uid="u_crawler-todo-2@u-crawler.local")),
+        )
+        (self.target / "assignment-2.ics").unlink()
+        (self.source / "assignment-2.ics").unlink()
+
+        self.assertEqual(self.mod.sync_deadlines(), (0, 0, 1))
+        self.assertFalse(renamed.exists())
 
     def test_emptied_source_is_not_a_deletion(self):
         write(self.source / "assignment-1.ics", vtodo())
@@ -269,6 +352,27 @@ class SyncWindowsTest(unittest.TestCase):
             (self.target / "assignment-1.ics").read_text(encoding="utf-8"),
             (self.source / "assignment-1.ics").read_text(encoding="utf-8"),
         )
+
+    def test_file_renamed_by_caldir_is_matched_by_uid(self):
+        write(self.source / "assignment-1.ics", vevent())
+        renamed = write(
+            self.target / "2026-08-30T1200__window-1.ics",
+            caldir_copy(vevent()),
+        )
+
+        self.assertEqual(self.mod.sync_windows(), (0, 0))
+        self.assertEqual(sorted(p.name for p in self.target.glob("*.ics")), [renamed.name])
+
+    def test_source_change_overwrites_the_renamed_file_in_place(self):
+        write(self.source / "assignment-1.ics", vevent(summary="Moved"))
+        renamed = write(
+            self.target / "2026-08-30T1200__window-1.ics",
+            caldir_copy(vevent()),
+        )
+
+        self.assertEqual(self.mod.sync_windows(), (1, 0))
+        self.assertEqual(sorted(p.name for p in self.target.glob("*.ics")), [renamed.name])
+        self.assertIn("SUMMARY:Moved", renamed.read_text(encoding="utf-8"))
 
     def test_removes_only_assignment_files_missing_from_source(self):
         write(self.source / "assignment-1.ics", vevent())
