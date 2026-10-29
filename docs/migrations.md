@@ -8,16 +8,18 @@ without manual edits inside containers. Each section is self-contained.
 From: any image built from `main` up to `2f3f0f4`, possibly with hand-made
 hotfixes inside the running container.
 To: `refactor/sync-discovery` (ADR-0009, ADR-0010), caldir fork commit
-`3b32b5ceceac50038d504cf8c8127af4ef6c58bd`.
+`5bf58e03901df33547ecf5a9db2caea1eee347da`.
 
 Nothing here deletes state, volumes or remote data. Every step before
 "Switch" is read-only for Google.
 
 ### 0. Preconditions (on the development machine)
 
-1. The caldir fork branch is published, so the pinned SHA can be fetched:
-   `git -C <caldir checkout> push origin fix/sync-bases-and-scope-refresh`
-   and merge it into `vtodo-support` (fast-forward).
+1. The pinned caldir SHA is published: belcaik/caldir#2 (sync bases,
+   scopes, pagination) is merged into `vtodo-support`, and belcaik/caldir#3
+   (`3ca66aa`, Google task identity) is merged or at least pushed. Never
+   build an image with #2 and without #3: it creates a new Google task for
+   every pushed task on every run.
 2. `refactor/sync-discovery` is merged into Vassago `main` and pushed.
 
 ### 1. Record what the host runs today
@@ -75,7 +77,7 @@ podman run --rm --entrypoint cat localhost/calendar-caldir:vtodo-support \
     /usr/local/share/caldir/BUILD_INFO
 ```
 
-`caldir_commit` must be `3b32b5ceceac50038d504cf8c8127af4ef6c58bd`. The build
+`caldir_commit` must be `5bf58e03901df33547ecf5a9db2caea1eee347da`. The build
 already failed if any of the four OAuth scopes were missing.
 
 ### 4. Baseline diagnosis with the new image, before switching (GET only)
@@ -87,6 +89,25 @@ podman-compose run --rm --entrypoint /usr/local/bin/diagnose-google.py caldir
 Keep the output: windows calendar visibility, event and task counts by
 status, and what happened to each local provider id. This may refresh the
 access token, which every pipeline run does anyway.
+
+### 4b. Restore orphaned Google Tasks mirror files (once)
+
+Mirror files for tasks pulled under a derived UID may have been removed while
+caldir kept their sync base. The new caldir lists every page of the task list,
+sees those tasks, and reads them as deleted locally: phase 1 would **delete
+them from Google**. Recreate the files from caldir's own bases first. The
+script only adds files. Run it without `--apply` first and check the list:
+
+```sh
+podman unshare python3 scripts/restore-orphan-task-files.py caldir/calendars/unab
+podman unshare python3 scripts/restore-orphan-task-files.py caldir/calendars/unab --apply
+```
+
+Then confirm phase 1 pushes no deletes (GET only):
+
+```sh
+podman-compose run --rm --entrypoint caldir caldir status --calendar unab
+```
 
 ### 5. Switch
 
@@ -102,7 +123,10 @@ Expected on the first run:
   reports 0.
 - `202625_*` (and any newer) courses get Radicale collections and canonical
   directories; their assignments are seeded into Google.
-- Tasks the old loop kept restoring are created in Google with new ids.
+- Tasks the old loop kept restoring are adopted, not recreated:
+  `[bridge] adopt Google task <- …` once per assignment whose Google task
+  already exists, then `canonical <- Google` for the ones completed in Google.
+  Only assignments with no Google task at all are created.
 - The run ends with `[verify] … 0 missing … 0 without …` and `[caldir] … done`.
 
 ### 6. Verify

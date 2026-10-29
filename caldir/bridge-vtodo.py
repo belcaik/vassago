@@ -421,6 +421,107 @@ def load_google() -> dict[str, Item]:
     return result
 
 
+def identity_key(item: Item) -> tuple[str, str] | None:
+    summaries = item.props.get("SUMMARY", [])
+    dues = item.props.get("DUE", [])
+
+    if not summaries or not dues:
+        return None
+
+    due_date = normalize_due_date(dues[0])
+
+    if due_date is None:
+        return None
+
+    return property_value(summaries[0]), due_date
+
+
+def adopt_google_copies(
+    canonical: dict[str, Item],
+    google: dict[str, Item],
+) -> int:
+    """Give a canonical assignment back the Google task it already has.
+
+    Google Tasks keeps no iCalendar UID, so caldir before fork 3ca66aa
+    pulled every pushed task back as `<id>@google-tasks.com` and dropped
+    the managed mirror file. Re-seeding that assignment would push a
+    second task to Google. Instead, an unmanaged mirror task carrying an
+    X-GOOGLE-TASK-ID no managed file claims, matching exactly one missing
+    assignment on SUMMARY and DUE date, is renamed to the assignment's UID.
+    Reconcile then treats it as the Google side.
+    """
+    claimed = {
+        property_value(item.props["X-GOOGLE-TASK-ID"][0])
+        for item in google.values()
+        if item.props.get("X-GOOGLE-TASK-ID")
+    }
+
+    missing: dict[tuple[str, str], list[str]] = {}
+
+    for uid, item in canonical.items():
+        key = identity_key(item)
+
+        if uid not in google and key is not None:
+            missing.setdefault(key, []).append(uid)
+
+    copies: dict[tuple[str, str], list[Item]] = {}
+
+    for path in sorted(GOOGLE_DIR.glob("*.ics")):
+        item = parse_vtodo(path)
+        task_ids = item.props.get("X-GOOGLE-TASK-ID", [])
+
+        if item.uid.startswith(MANAGED_UID_PREFIX) or not task_ids:
+            continue
+
+        if property_value(task_ids[0]) in claimed:
+            continue
+
+        key = identity_key(item)
+
+        if key is not None:
+            copies.setdefault(key, []).append(item)
+
+    adopted = 0
+
+    for key, uids in sorted(missing.items()):
+        found = copies.get(key, [])
+
+        if len(uids) != 1 or not found:
+            continue
+
+        # Google may already hold duplicates of one assignment. Adopting one
+        # (lowest task id) keeps a third copy from being pushed; the others
+        # stay unmanaged and untouched.
+        uid = uids[0]
+        copy = min(
+            found,
+            key=lambda item: property_value(item.props["X-GOOGLE-TASK-ID"][0]),
+        )
+
+        lines = unfold(copy.raw)
+        start, end = find_vtodo(lines)
+
+        for index in range(start + 1, end):
+            if property_name(lines[index]) == "UID":
+                lines[index] = f"UID:{uid}"
+
+        atomic_write(
+            copy.path,
+            "\r\n".join(lines).rstrip("\r\n") + "\r\n",
+        )
+
+        google[uid] = refresh(copy.path)
+
+        print(
+            f"[bridge] adopt Google task <- {uid} "
+            "(already in Google under a derived UID)"
+        )
+
+        adopted += 1
+
+    return adopted
+
+
 def load_state() -> dict:
     if not STATE_FILE.exists():
         return {
@@ -525,13 +626,15 @@ def reconcile(
     canonical = load_canonical()
     google = load_google()
 
+    adopted = adopt_google_copies(canonical, google)
+
     all_uids = sorted(
         set(canonical)
         | set(google)
         | set(state.get("items", {}))
     )
 
-    changed = 0
+    changed = adopted
     deleted = 0
     conflicts = 0
 

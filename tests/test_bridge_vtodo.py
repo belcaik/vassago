@@ -340,6 +340,121 @@ class ReconcileTest(unittest.TestCase):
 
         self.assertEqual(self.mod.load_state(), {"version": 2, "items": {}})
 
+    def google_copy(self, task_id="gt-1", name="copy.ics", summary="Assignment 1",
+                    due="DUE;VALUE=DATE:20260830", status="COMPLETED"):
+        """A task pulled back from Google under its derived UID."""
+        return write(
+            self.google_dir / name,
+            vtodo(
+                uid=f"{task_id}@google-tasks.com",
+                summary=summary,
+                due=due,
+                extra=f"STATUS:{status}\nX-GOOGLE-TASK-ID:{task_id}",
+            ),
+        )
+
+    def managed_google_files(self):
+        return [
+            path for path in self.google_dir.glob("*.ics")
+            if f"UID:{UID}" in path.read_text(encoding="utf-8")
+        ]
+
+    def test_google_copy_under_derived_uid_is_adopted_not_reseeded(self):
+        path = self.canonical()
+        state = self.seed()
+        self.google().unlink()
+        copy = self.google_copy()
+
+        changed, deleted, conflicts = self.mod.reconcile(state)
+
+        self.assertEqual((deleted, conflicts), (0, 0))
+        self.assertGreaterEqual(changed, 1)
+        self.assertEqual(self.managed_google_files(), [copy])
+        adopted = copy.read_text(encoding="utf-8")
+        self.assertIn("X-GOOGLE-TASK-ID:gt-1", adopted)
+        self.assertNotIn("@google-tasks.com", adopted)
+        # The Google side wins, as for any Google edit.
+        self.assertIn("STATUS:COMPLETED", path.read_text(encoding="utf-8"))
+
+    def test_adopted_copy_converges_on_the_next_run(self):
+        self.canonical()
+        state = self.seed()
+        self.google().unlink()
+        self.google_copy()
+        self.mod.reconcile(state)
+
+        self.assertEqual(self.mod.reconcile(state), (0, 0, 0))
+
+    def test_one_of_duplicate_google_copies_is_adopted(self):
+        self.canonical()
+        state = self.seed()
+        self.google().unlink()
+        first = self.google_copy("gt-1", "first.ics")
+        second = self.google_copy("gt-2", "second.ics")
+        before = second.read_bytes()
+
+        self.mod.reconcile(state)
+
+        self.assertEqual(self.managed_google_files(), [first])
+        self.assertEqual(before, second.read_bytes())
+
+    def test_copy_matching_two_assignments_is_not_adopted(self):
+        self.canonical()
+        self.canonical(
+            vtodo(uid="u_crawler-todo-2@u-crawler.local"),
+            name="assignment-2.ics",
+        )
+        copy = self.google_copy()
+
+        self.mod.reconcile({"version": 2, "items": {}})
+
+        self.assertIn("@google-tasks.com", copy.read_text(encoding="utf-8"))
+
+    def test_google_copy_with_another_due_date_is_not_adopted(self):
+        self.canonical()
+        state = self.seed()
+        self.google().unlink()
+        copy = self.google_copy(due="DUE;VALUE=DATE:20260901")
+
+        self.mod.reconcile(state)
+
+        self.assertIn("@google-tasks.com", copy.read_text(encoding="utf-8"))
+        self.assertEqual(self.managed_google_files(), [self.google()])
+
+    def test_google_copy_whose_task_id_is_claimed_is_not_adopted(self):
+        self.canonical()
+        self.canonical(
+            vtodo(uid="u_crawler-todo-2@u-crawler.local", summary="Other"),
+            name="assignment-2.ics",
+        )
+        state = {"version": 2, "items": {}}
+        self.mod.reconcile(state)
+        self.edit(
+            self.google("assignment-2.ics"),
+            "SUMMARY:Other",
+            "SUMMARY:Other\r\nX-GOOGLE-TASK-ID:gt-1",
+        )
+        self.google().unlink()
+        copy = self.google_copy("gt-1")
+
+        self.mod.reconcile(state)
+
+        self.assertIn("@google-tasks.com", copy.read_text(encoding="utf-8"))
+
+    def test_personal_google_task_without_task_id_is_untouched(self):
+        self.canonical()
+        state = self.seed()
+        self.google().unlink()
+        personal = write(
+            self.google_dir / "personal.ics",
+            vtodo(uid="personal@google-tasks.com", due="DUE;VALUE=DATE:20260830"),
+        )
+        before = personal.read_bytes()
+
+        self.mod.reconcile(state)
+
+        self.assertEqual(before, personal.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()
