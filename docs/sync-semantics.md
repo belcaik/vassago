@@ -260,6 +260,17 @@ properties except `IGNORE_FOR_HASH` (`DTSTAMP`, `LAST-MODIFIED`, `SEQUENCE`),
 `GOOGLE_ASSIGNED` and `X-GOOGLE-*`. Because the hash rule changed, the first
 run after the upgrade rewrites each window's mirror once.
 
+**Google normalization is not an edit.** Google writes `DTSTART`/`DTEND` back
+as local time with `TZID` where the canonical file has UTC (`...Z`), and drops
+`URL` (`GOOGLE_DROPPED`), so the mirror's hash never matched what the bridge
+wrote and every window was rewritten and PATCHed on every run. Before writing,
+`google_equivalent` compares both sides with DATE-TIME values normalized to UTC
+instants and `GOOGLE_DROPPED` ignored; an ambiguous local time in the DST fall-back
+hour matches either occurrence, an unknown `TZID` or a `Z` value carrying `TZID`
+is never equivalent. When equivalent, the bridge only records the mirror's hash
+in state and logs `[windows-bridge] google normalized <uid>` (row 9); row 4 skips
+the write silently. Any other difference is still overwritten by canonical.
+
 ### Decision table
 
 `reconcile()` (`:340-552`).
@@ -269,12 +280,12 @@ run after the upgrade rewrites each window's mirror once.
 | 1 | any | absent | absent | skip (`:361-362`) |
 | 2 | none | present | absent | `seed_google`: copy the canonical file into the mirror verbatim. Logs `[windows-bridge] seed Google <- <uid>` (`:365-381`, `:308-316`) |
 | 3 | none | absent | present | CONFLICT `managed event exists only in Google` (`:383-391`) |
-| 4 | none | present | present | `merge_canonical_into_google`; write only if it differs (`:393-417`) |
+| 4 | none | present | present | record state only if `google_equivalent`; otherwise `merge_canonical_into_google`, write only if it differs (`:393-417`) |
 | 5 | exists | absent | present, unchanged | delete the Google mirror file. Logs `[windows-bridge] delete Google <- <uid>` (`:442-468`) |
 | 6 | exists | absent | present, changed | CONFLICT `deleted canonically but changed in Google` (`:443-451`) |
 | 7 | exists | present | absent | re-seed Google unconditionally — no change check on the canonical side, unlike the VTODO bridge. Logs `[windows-bridge] restore Google <- <uid>` (`:470-486`) |
 | 8 | exists | unchanged | unchanged | skip (`:491-492`) |
-| 9 | exists | unchanged | changed | overwrite Google from canonical. Logs `[windows-bridge] canonical -> Google <uid>` (`:494-522`) |
+| 9 | exists | unchanged | changed | record state only if `google_equivalent` (logs `[windows-bridge] google normalized <uid>`); otherwise overwrite Google from canonical. Logs `[windows-bridge] canonical -> Google <uid>` (`:494-522`) |
 | 10 | exists | changed | changed or unchanged | overwrite Google from canonical. Logs `[windows-bridge] Google <- canonical <uid>` (`:524-550`) |
 
 Row 10 catches both "only canonical changed" and "both changed" — because
