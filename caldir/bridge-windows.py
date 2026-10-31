@@ -10,6 +10,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import courses
 
@@ -52,6 +53,12 @@ GOOGLE_PRIVATE_PREFIX = "X-GOOGLE-"
 # them, in which case it wins) and do not count as a Google-side edit.
 GOOGLE_ASSIGNED = {
     "ORGANIZER",
+}
+
+# Properties Google Calendar cannot store and therefore omits from its
+# write-back. They do not count as a Google-side edit.
+GOOGLE_DROPPED = {
+    "URL",
 }
 
 
@@ -169,6 +176,157 @@ def semantic_hash(item: Item) -> str:
     return hashlib.sha256(
         "\n".join(values).encode("utf-8")
     ).hexdigest()
+
+
+def is_date_time(value: str) -> bool:
+    raw = value[:-1] if value.endswith("Z") else value
+
+    return (
+        len(raw) == 15
+        and raw[8] == "T"
+        and raw[:8].isdigit()
+        and raw[9:].isdigit()
+    )
+
+
+def utc_date_times(
+    date_times: list[str],
+    tzid: str | None,
+) -> list[set[str]] | None:
+    try:
+        source_zone = (
+            ZoneInfo(tzid)
+            if tzid is not None
+            else timezone.utc
+        )
+        normalized: list[set[str]] = []
+
+        for date_time in date_times:
+            raw = (
+                date_time[:-1]
+                if date_time.endswith("Z")
+                else date_time
+            )
+            local = datetime.strptime(
+                raw,
+                "%Y%m%dT%H%M%S",
+            )
+            folds = (0, 1) if tzid is not None else (0,)
+            normalized.append({
+                local.replace(
+                    tzinfo=source_zone,
+                    fold=fold,
+                ).astimezone(timezone.utc).strftime(
+                    "%Y%m%dT%H%M%SZ"
+                )
+                for fold in folds
+            })
+    except (ValueError, ZoneInfoNotFoundError):
+        return None
+
+    return normalized
+
+
+def normalized_datetime_line(line: str) -> set[str] | None:
+    header, value = line.split(":", 1)
+    parts = header.split(";")
+    kept = [parts[0]]
+    tzid = None
+
+    for parameter in parts[1:]:
+        key, separator, parameter_value = parameter.partition("=")
+
+        if separator and key.upper() == "TZID":
+            tzid = parameter_value.strip('"')
+        else:
+            kept.append(parameter)
+
+    date_times = value.split(",")
+
+    if "T" not in value:
+        return {line}
+
+    if tzid is not None and any(
+        date_time.endswith("Z")
+        for date_time in date_times
+    ):
+        return None
+
+    if not all(is_date_time(date_time) for date_time in date_times):
+        return None if tzid is not None else {line}
+
+    if tzid is None and not all(
+        date_time.endswith("Z")
+        for date_time in date_times
+    ):
+        return {line}
+
+    normalized = utc_date_times(date_times, tzid)
+
+    if normalized is None:
+        return None
+
+    candidates = {""}
+
+    for values in normalized:
+        candidates = {
+            f"{prefix},{value}" if prefix else value
+            for prefix in candidates
+            for value in values
+        }
+
+    return {
+        f"{';'.join(kept)}:{candidate}"
+        for candidate in candidates
+    }
+
+
+def google_signature(item: Item) -> tuple[set[str], ...] | None:
+    values: list[set[str]] = []
+
+    for name in sorted(item.props):
+        if (
+            name in IGNORE_FOR_HASH
+            or name in GOOGLE_ASSIGNED
+            or name in GOOGLE_DROPPED
+        ):
+            continue
+
+        if name.startswith(GOOGLE_PRIVATE_PREFIX):
+            continue
+
+        for line in item.props[name]:
+            normalized = normalized_datetime_line(line)
+
+            if normalized is None:
+                return None
+
+            values.append(normalized)
+
+    return tuple(values)
+
+
+def google_equivalent(
+    canonical: Item,
+    google: Item,
+) -> bool:
+    canonical_signature = google_signature(canonical)
+    google_signature_value = google_signature(google)
+
+    if (
+        canonical_signature is None
+        or google_signature_value is None
+        or len(canonical_signature) != len(google_signature_value)
+    ):
+        return False
+
+    return all(
+        canonical_values & google_values
+        for canonical_values, google_values in zip(
+            canonical_signature,
+            google_signature_value,
+        )
+    )
 
 
 def load_canonical() -> dict[str, Item]:
@@ -406,6 +564,16 @@ def reconcile(
             assert left is not None
             assert right is not None
 
+            if google_equivalent(left, right):
+                record_state(
+                    state,
+                    uid,
+                    left,
+                    right,
+                )
+
+                continue
+
             merged = merge_canonical_into_google(
                 right,
                 left,
@@ -505,6 +673,20 @@ def reconcile(
             continue
 
         if right_changed and not left_changed:
+            if google_equivalent(left, right):
+                print(
+                    f"[windows-bridge] google normalized {uid}"
+                )
+
+                record_state(
+                    state,
+                    uid,
+                    left,
+                    right,
+                )
+
+                continue
+
             # u_crawler/Canvas is authoritative for delivery windows.
             # Manual Google edits are overwritten intentionally.
             merged = merge_canonical_into_google(

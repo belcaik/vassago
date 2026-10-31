@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +90,150 @@ class MergeTest(unittest.TestCase):
             self.mod.semantic_hash(tagged),
         )
 
+    def test_google_equivalent_accepts_summer_tzid_and_utc_same_instant(self):
+        canonical = self.item(
+            vevent().replace("20260830", "20261230"),
+            "canonical-time.ics",
+        )
+        google = self.item(
+            vevent().replace("20260830", "20261230").replace(
+                "DTSTART:20261230T120000Z",
+                "DTSTART;TZID=America/Santiago:20261230T090000",
+            ).replace(
+                "DTEND:20261230T235900Z",
+                "DTEND;TZID=America/Santiago:20261230T205900",
+            ),
+            "google-time.ics",
+        )
+
+        self.assertTrue(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_accepts_both_folds_of_ambiguous_time(self):
+        google = self.item(
+            vevent().replace(
+                "DTEND:20260830T235900Z",
+                "DTEND;TZID=America/Santiago:20270403T235900",
+            ),
+            "google-fold.ics",
+        )
+
+        for instant in ("20270404T025900Z", "20270404T035900Z"):
+            with self.subTest(instant=instant):
+                canonical = self.item(
+                    vevent().replace("20260830T235900Z", instant),
+                    f"canonical-{instant}.ics",
+                )
+                self.assertTrue(
+                    self.mod.google_equivalent(canonical, google)
+                )
+
+    def test_google_equivalent_rejects_utc_value_with_tzid(self):
+        canonical = self.item(vevent(), "canonical-z-tzid.ics")
+        google = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;TZID=America/Santiago:20260830T120000Z",
+            ),
+            "google-z-tzid.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_rejects_different_instant(self):
+        canonical = self.item(vevent(), "canonical-different.ics")
+        google = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;TZID=America/Santiago:20260830T090000",
+            ),
+            "google-different.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_accepts_missing_url(self):
+        canonical = self.item(
+            vevent(extra="URL:https://example.edu/window"),
+            "canonical-url.ics",
+        )
+        google = self.item(vevent(), "google-url.ics")
+
+        self.assertTrue(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_rejects_changed_summary(self):
+        canonical = self.item(vevent(), "canonical-summary.ics")
+        google = self.item(
+            vevent(summary="Edited in Google"),
+            "google-summary.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_compares_summary_with_t_and_commas_as_text(self):
+        canonical = self.item(
+            vevent(summary="Take T, then submit"),
+            "canonical-text-summary.ics",
+        )
+        same = self.item(
+            vevent(summary="Take T, then submit"),
+            "google-text-summary-same.ics",
+        )
+        changed = self.item(
+            vevent(summary="Take T, then wait"),
+            "google-text-summary-changed.ics",
+        )
+
+        self.assertTrue(self.mod.google_equivalent(canonical, same))
+        self.assertFalse(self.mod.google_equivalent(canonical, changed))
+
+    def test_google_equivalent_compares_floating_time_as_is(self):
+        canonical = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART:20260830T120000",
+            ),
+            "canonical-floating.ics",
+        )
+        google = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;TZID=America/Santiago:20260830T080000",
+            ),
+            "google-floating.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_compares_all_day_date_as_is(self):
+        canonical = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;VALUE=DATE:20260830",
+            ),
+            "canonical-date.ics",
+        )
+        google = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;VALUE=DATE:20260831",
+            ),
+            "google-date.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
+    def test_google_equivalent_rejects_unknown_timezone(self):
+        canonical = self.item(vevent(), "canonical-zone.ics")
+        google = self.item(
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;TZID=Invalid/Zone:20260830T080000",
+            ),
+            "google-zone.ics",
+        )
+
+        self.assertFalse(self.mod.google_equivalent(canonical, google))
+
 
 class ReconcileTest(unittest.TestCase):
     def setUp(self):
@@ -161,6 +307,68 @@ class ReconcileTest(unittest.TestCase):
             "SUMMARY:Delivery window 1",
             self.google().read_text(encoding="utf-8"),
         )
+
+    def test_google_normalization_is_recorded_without_rewrite(self):
+        self.canonical(vevent(extra="URL:https://example.edu/window"))
+        state = self.seed()
+        path = self.google()
+        raw = path.read_text(encoding="utf-8")
+        normalized = raw.replace(
+            "DTSTART:20260830T120000Z",
+            "DTSTART;TZID=America/Santiago:20260830T080000",
+        ).replace(
+            "DTEND:20260830T235900Z",
+            "DTEND;TZID=America/Santiago:20260830T195900",
+        ).replace(
+            "URL:https://example.edu/window\n",
+            "",
+        )
+        write(path, normalized)
+        before = path.read_bytes()
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            result = self.mod.reconcile(state)
+
+        self.assertEqual(result, (0, 0, 0))
+        self.assertIn(
+            f"[windows-bridge] google normalized {UID}",
+            out.getvalue(),
+        )
+        self.assertEqual(path.read_bytes(), before)
+
+        self.edit(
+            path,
+            "DTSTART;TZID=America/Santiago:20260830T080000",
+            "DTSTART;TZID=America/Santiago:20260830T090000",
+        )
+
+        self.assertEqual(self.mod.reconcile(state), (1, 0, 0))
+        self.assertIn(
+            "DTSTART:20260830T120000Z",
+            path.read_text(encoding="utf-8"),
+        )
+
+    def test_first_observation_of_google_normalization_is_unchanged(self):
+        self.canonical(vevent(extra="URL:https://example.edu/window"))
+        path = write(
+            self.google(),
+            vevent().replace(
+                "DTSTART:20260830T120000Z",
+                "DTSTART;TZID=America/Santiago:20260830T080000",
+            ).replace(
+                "DTEND:20260830T235900Z",
+                "DTEND;TZID=America/Santiago:20260830T195900",
+            ),
+        )
+        before = path.read_bytes()
+        state = {"version": 1, "items": {}}
+
+        self.assertEqual(self.mod.reconcile(state), (0, 0, 0))
+        self.assertEqual(path.read_bytes(), before)
+        self.assertIn(UID, state["items"])
+        self.assertEqual(self.mod.reconcile(state), (0, 0, 0))
+        self.assertEqual(path.read_bytes(), before)
 
     def test_canonical_change_is_pushed_to_google(self):
         path = self.canonical()

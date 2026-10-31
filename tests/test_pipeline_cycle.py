@@ -18,7 +18,9 @@ import itertools
 import shutil
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from _load import load_script, write
 
@@ -35,7 +37,13 @@ def vtodo(number, summary=None, due="20260830T235900Z"):
     )
 
 
-def vevent(number, start="20260825T120000Z", end="20260830T235900Z"):
+def vevent(
+    number,
+    start="20260825T120000Z",
+    end="20260830T235900Z",
+    url=None,
+):
+    url_line = f"URL:{url}\n" if url is not None else ""
     return (
         "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//u_crawler//EN\n"
         "BEGIN:VEVENT\n"
@@ -43,6 +51,7 @@ def vevent(number, start="20260825T120000Z", end="20260830T235900Z"):
         "DTSTAMP:20260101T000000Z\n"
         f"SUMMARY:Window {number}\n"
         f"DTSTART:{start}\nDTEND:{end}\n"
+        f"{url_line}"
         "END:VEVENT\nEND:VCALENDAR\n"
     )
 
@@ -72,6 +81,7 @@ class FakeCaldir:
         # Lines the provider adds to every item it returns (Google adds
         # ORGANIZER to events) and never sends back on a push.
         self.assigned_lines: list[str] = []
+        self.normalize_event_times = False
 
     # Google-side actions --------------------------------------------------
     def user_edits(self, uid, old, new):
@@ -100,6 +110,24 @@ class FakeCaldir:
         body = body.replace(
             marker, f"{added}{self.id_prop}:{remote_id}\n{marker}"
         )
+        if self.normalize_event_times and marker == "END:VEVENT":
+            normalized = []
+            local_zone = ZoneInfo("America/Santiago")
+            for line in body.split("\n"):
+                if line.startswith(("DTSTART:", "DTEND:")):
+                    name, value = line.split(":", 1)
+                    instant = datetime.strptime(
+                        value,
+                        "%Y%m%dT%H%M%SZ",
+                    ).replace(tzinfo=ZoneInfo("UTC"))
+                    local = instant.astimezone(local_zone)
+                    line = (
+                        f"{name};TZID=America/Santiago:"
+                        f"{local.strftime('%Y%m%dT%H%M%S')}"
+                    )
+                if not line.startswith("URL:"):
+                    normalized.append(line)
+            body = "\n".join(normalized)
         return body.replace("\n", "\r\n")
 
     def sync(self):
@@ -367,6 +395,45 @@ class PipelineCycleTest(unittest.TestCase):
         ]
         self.export("202625_physics", 1, kind="windows")
         self.export("202625_physics", 2, kind="windows")
+        self.cycle()
+        self.google_cal.changes = 0
+
+        rcs, verify, out = self.cycle()
+
+        self.assertEqual((rcs, verify), ((0, 0), 0))
+        self.assertEqual(self.google_cal.changes, 0)
+        self.assertIn(
+            "[windows-bridge] done: 0 changed, 0 deleted, 0 conflicts", out
+        )
+
+    def test_google_normalized_times_and_url_do_not_cause_perpetual_updates(self):
+        self.google_cal.normalize_event_times = True
+        self.export(
+            "202625_physics",
+            1,
+            text=vevent(1, url="https://example.edu/window"),
+            kind="windows",
+        )
+        self.cycle()
+        self.google_cal.changes = 0
+
+        rcs, verify, out = self.cycle()
+
+        self.assertEqual((rcs, verify), ((0, 0), 0))
+        self.assertEqual(self.google_cal.changes, 0)
+        self.assertIn(
+            "[windows-bridge] done: 0 changed, 0 deleted, 0 conflicts", out
+        )
+
+        self.export(
+            "202625_physics",
+            1,
+            text=vevent(
+                1,
+                url="https://example.edu/window",
+            ).replace("SUMMARY:Window 1", "SUMMARY:Moved window"),
+            kind="windows",
+        )
         self.cycle()
         self.google_cal.changes = 0
 
