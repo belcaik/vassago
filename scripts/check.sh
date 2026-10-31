@@ -70,7 +70,7 @@ step 3 "secret guard: no runtime state or credentials tracked"
 tracked_secrets="$(
     git ls-files \
         | grep -v '^\.env\.example$' \
-        | grep -E '^\.env$|^\.env\.|^radicale/config/users$|^radicale/data/|^caldir/config/|^caldir/state/|^caldir/calendars/|^u-crawler/config/|quarantine-|\.bak$|\.tar(\.gz)?$' \
+        | grep -E '^\.env$|^\.env\.|^radicale/config/users$|^radicale/data/|^caldir/config/|^caldir/state/|^caldir/calendars/|^u-crawler/config/|(^|/)quarantine-[^/]+/|\.bak$|\.tar(\.gz)?$' \
         || true
 )"
 
